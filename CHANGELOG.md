@@ -4,6 +4,8 @@ Each release has a `## <version>` section. The release pipeline publishes that s
 
 ## Unreleased
 
+- The folder picker keeps one size; long folder lists scroll inside it instead of resizing the window.
+
 ## 0.3.0
 
 - The console server can serve more than JSON and one page, for tools built on it (cbz-shelf's library and reader):
