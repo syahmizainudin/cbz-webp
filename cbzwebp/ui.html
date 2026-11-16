@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CBZ WebP Queue</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e3e6eb;
+    --accent: #2f6fed; --accent-text: #fff; --ok: #16794c; --warn: #a15c00; --bad: #c0362c;
+    --run: #2f6fed; --bar: #e8edf7; --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1a1f27; --text: #e6e9ef; --muted: #98a2b3; --line: #2a313c;
+      --accent: #5b8cff; --accent-text: #0b1020; --ok: #4cc38a; --warn: #f0a742; --bad: #ff6b5e;
+      --run: #5b8cff; --bar: #252c38; --chip: #232a35;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  textarea { width: 100%; min-height: 64px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+             background: var(--bg); color: var(--text); font: 13px ui-monospace, Menlo, Consolas, monospace; resize: vertical; }
+  .row { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: center; margin-top: 12px; }
+  .q { display: flex; align-items: center; gap: 10px; }
+  .q input[type=range] { width: 180px; }
+  .q input[type=number] { width: 64px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .check { display: flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; }
+  button { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 6px 12px;
+           border-radius: 8px; cursor: pointer; font: inherit; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:hover { filter: brightness(0.96); }
+  button.link { border: none; background: none; padding: 2px 4px; color: var(--accent); }
+  .msg { margin-top: 10px; min-height: 1.2em; color: var(--muted); }
+  .msg.err { color: var(--bad); }
+  .bar-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--muted); }
+  .chip b { color: var(--text); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; border-top: none; }
+  td.name { word-break: break-all; }
+  td.name .dir { color: var(--muted); font-size: 12px; }
+  .state { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .s-queued { color: var(--muted); } .s-running { color: var(--run); } .s-done { color: var(--ok); }
+  .s-skipped { color: var(--warn); } .s-failed { color: var(--bad); } .s-cancelled { color: var(--muted); }
+  .prog { height: 6px; background: var(--bar); border-radius: 3px; overflow: hidden; margin-top: 4px; width: 120px; }
+  .prog > i { display: block; height: 100%; background: var(--run); }
+  .size { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); text-align: center; padding: 24px; }
+  @media (max-width: 720px) {
+    thead { display: none; }
+    tr { display: block; border-top: 1px solid var(--line); padding: 8px 0; }
+    td { display: block; border: none; padding: 2px 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>CBZ WebP Queue</h1>
+  <p class="sub">Recompresses images inside .zip / .cbz archives to WebP and writes .cbz files. Folders are scanned recursively.</p>
+
+  <section class="panel">
+    <label for="paths">Folders or archive files (one per line)</label>
+    <textarea id="paths" placeholder="/mnt/d/Comics&#10;C:\Comics\Series A"></textarea>
+    <div class="row">
+      <div class="q">
+        <label for="qr" style="margin:0">WebP quality</label>
+        <input type="range" id="qr" min="1" max="100">
+        <input type="number" id="qn" min="1" max="100"><span class="note">%</span>
+      </div>
+      <label class="check"><input type="checkbox" id="del" checked> Delete original .zip after the .cbz is verified</label>
+      <label class="check"><input type="checkbox" id="ovw"> Overwrite an existing .cbz</label>
+      <button class="primary" id="add">Add to queue</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <section class="panel">
+    <div class="bar-head">
+      <div class="stats" id="stats"></div>
+      <div class="actions">
+        <button id="pause">Pause</button>
+        <button id="cancelAll">Cancel all</button>
+        <button id="clear">Clear finished</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Archive</th><th>State</th><th>Quality</th><th>Size</th><th>Details</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="empty">Queue is empty.</td></tr></tbody>
+    </table>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let paused = false, defaultsSet = false;
+
+function fmt(n) {
+  if (!n) return "–";
+  const u = ["B","KB","MB","GB"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + " " + u[i];
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+function say(text, err) { const m = $("msg"); m.textContent = text; m.className = "msg" + (err ? " err" : ""); }
+
+$("qr").oninput = () => $("qn").value = $("qr").value;
+$("qn").oninput = () => $("qr").value = $("qn").value;
+
+$("add").onclick = async () => {
+  const paths = $("paths").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const quality = parseInt($("qn").value, 10);
+  if (!paths.length) return say("Enter at least one folder.", true);
+  if (!(quality >= 1 && quality <= 100)) return say("Quality must be 1–100.", true);
+  try {
+    const r = await api("/api/add", { paths, quality, delete_original: $("del").checked, overwrite: $("ovw").checked });
+    say(`Queued ${r.added} archive(s)` + (r.duplicates ? `, ${r.duplicates} already in queue` : "") + ".");
+    refresh();
+  } catch (e) { say(e.message, true); }
+};
+$("pause").onclick = async () => { await api("/api/pause", { paused: !paused }); refresh(); };
+$("clear").onclick = async () => { await api("/api/clear", {}); refresh(); };
+$("cancelAll").onclick = async () => {
+  if (confirm("Cancel every queued and running job?")) { await api("/api/cancel-all", {}); refresh(); }
+};
+$("rows").onclick = async ev => {
+  const b = ev.target.closest("button[data-act]"); if (!b) return;
+  await api("/api/" + b.dataset.act, { id: +b.dataset.id }); refresh();
+};
+
+function render(st) {
+  paused = st.paused;
+  $("pause").textContent = paused ? "Resume" : "Pause";
+  if (!defaultsSet) { $("qr").value = $("qn").value = st.defaults.quality; defaultsSet = true; }
+
+  const c = {}; let bin = 0, bout = 0;
+  for (const j of st.jobs) { c[j.state] = (c[j.state] || 0) + 1; if (j.state === "done") { bin += j.bytes_in; bout += j.bytes_out; } }
+  const chips = ["queued","running","done","skipped","failed","cancelled"].filter(k => c[k]).map(k => `<span class="chip">${k} <b>${c[k]}</b></span>`);
+  if (bin) chips.push(`<span class="chip">saved <b>${fmt(bin - bout)}</b> (${Math.round(100 * (1 - bout / bin))}%)</span>`);
+  chips.push(`<span class="chip">${st.workers} archive worker(s) · ${st.image_threads} image threads${paused ? " · <b>paused</b>" : ""}</span>`);
+  $("stats").innerHTML = chips.join("");
+
+  if (!st.jobs.length) { $("rows").innerHTML = `<tr><td colspan="6" class="empty">Queue is empty.</td></tr>`; return; }
+  $("rows").innerHTML = st.jobs.map(j => {
+    const dir = j.path.slice(0, j.path.length - j.name.length);
+    const pct = j.total ? Math.round(100 * j.done / j.total) : 0;
+    const prog = j.state === "running" ? `<div class="prog"><i style="width:${pct}%"></i></div><span class="note">${j.done}/${j.total}</span>` : "";
+    const size = j.bytes_out ? `${fmt(j.bytes_in)} → ${fmt(j.bytes_out)}` : (j.bytes_in ? fmt(j.bytes_in) : "–");
+    let det = esc(j.message);
+    if (j.deleted) det += `<div class="note">deleted ${esc(j.deleted.split("/").pop())}</div>`;
+    if (j.kept && j.kept.length) det += `<div class="note" title="${esc(j.kept.join("\n"))}">kept as-is: ${esc(j.kept.slice(0,3).join(", "))}${j.kept.length > 3 ? "…" : ""}</div>`;
+    const act = (j.state === "queued" || j.state === "running") ? `<button class="link" data-act="cancel" data-id="${j.id}">Cancel</button>`
+              : (j.state === "failed" || j.state === "cancelled") ? `<button class="link" data-act="retry" data-id="${j.id}">Retry</button>` : "";
+    return `<tr><td class="name">${esc(j.name)}<div class="dir">${esc(dir)}</div></td>
+      <td><span class="state s-${j.state}">${j.state}</span>${prog}</td>
+      <td>${j.quality}%${j.delete_original ? "" : ' <span class="note">keep</span>'}</td>
+      <td class="size">${size}</td><td>${det}</td><td>${act}</td></tr>`;
+  }).join("");
+}
+
+async function refresh() { try { render(await api("/api/state")); } catch (e) { say("Lost connection to the server: " + e.message, true); } }
+refresh(); setInterval(refresh, 1000);
+</script>
+</body>
+</html>
