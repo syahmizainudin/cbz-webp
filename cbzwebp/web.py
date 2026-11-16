@@ -45,9 +45,13 @@ def make_handler(queue: JobQueue, defaults: dict):
             return urlsplit(origin).netloc == self.headers.get("Host")
 
         def _state(self) -> dict:
-            return {"jobs": queue.snapshot(), "paused": queue.paused,
-                    "workers": queue.workers, "image_threads": queue.image_threads,
-                    "defaults": defaults}
+            return {
+                "jobs": queue.snapshot(),
+                "paused": queue.paused,
+                "workers": queue.workers,
+                "image_threads": queue.image_threads,
+                "defaults": defaults,
+            }
 
         # ---------------------------------------------------- routes
         def do_GET(self):
@@ -79,10 +83,12 @@ def make_handler(queue: JobQueue, defaults: dict):
                     if not paths:
                         return self._json({"error": "give at least one folder or file"}, 400)
                     added, dupes = queue.add(
-                        paths, int(body.get("quality", defaults["quality"])),
+                        paths,
+                        int(body.get("quality", defaults["quality"])),
                         delete_original=bool(body.get("delete_original", True)),
                         overwrite=bool(body.get("overwrite", False)),
-                        recursive=bool(body.get("recursive", True)))
+                        recursive=bool(body.get("recursive", True)),
+                    )
                     return self._json({"added": len(added), "duplicates": dupes})
                 if path == "/api/cancel":
                     return self._json({"ok": queue.cancel(int(body["id"]))})

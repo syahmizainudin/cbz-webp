@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call: # the release workflow runs this first
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RUFF_VERSION: "0.17.5"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff==${RUFF_VERSION}"
+      - name: Lint
+        run: ruff check --output-format=github .
+      - name: Format
+        run: ruff format --check .
+
+  test:
+    name: test (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+      - run: pip install pillow
+      - name: Check Pillow has WebP
+        run: python -c "from PIL import features; assert features.check('webp'), 'Pillow built without WebP'"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+  package:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Install the wheel in a clean venv and run it
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/smoke/bin/cbz-webp --version
+          mkdir -p lib/sub
+          /tmp/smoke/bin/python - <<'EOF'
+          import io, zipfile
+          from PIL import Image
+          buf = io.BytesIO()
+          Image.effect_noise((600, 900), 50).convert("RGB").save(buf, "JPEG", quality=95)
+          with zipfile.ZipFile("lib/sub/Ch 1.zip", "w") as z:
+              for i in range(3):
+                  z.writestr(f"{i:03}.jpg", buf.getvalue())
+          EOF
+          /tmp/smoke/bin/cbz-webp convert lib -q 70
+          test -f "lib/sub/Ch 1.cbz"
+          test ! -e "lib/sub/Ch 1.zip"
+          /tmp/smoke/bin/python -c "import zipfile; z = zipfile.ZipFile('lib/sub/Ch 1.cbz'); assert z.testzip() is None; assert z.namelist() == ['000.webp', '001.webp', '002.webp'], z.namelist()"
+          /tmp/smoke/bin/python -c "import cbzwebp.web"  # ui.html is packaged
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

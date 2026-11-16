@@ -1,8 +1,6 @@
 """Run: python3 -m unittest discover -s tests  (from the cbz-webp folder)."""
 
 import io
-import os
-import sys
 import tempfile
 import threading
 import unittest
@@ -10,42 +8,11 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from helpers import comic_entries, img_bytes, make_zip
+from PIL import Image
 
-from PIL import Image  # noqa: E402
-
-from cbzwebp import core  # noqa: E402
-from cbzwebp.jobqueue import CANCELLED, DONE, FAILED, SKIPPED, JobQueue  # noqa: E402
-
-
-def img_bytes(fmt, mode="RGB", size=(300, 400), **kw):
-    im = Image.effect_noise(size, 40).convert(mode) if mode != "P" else \
-        Image.effect_noise(size, 40).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE)
-    b = io.BytesIO()
-    im.save(b, fmt, **kw)
-    return b.getvalue()
-
-
-def png_transparent():
-    im = Image.effect_noise((300, 400), 40).convert("RGBA")
-    im.putalpha(128)
-    b = io.BytesIO()
-    im.save(b, "PNG")
-    return b.getvalue()
-
-
-def gif_animated():
-    frames = [Image.new("RGB", (50, 50), c) for c in ("red", "green", "blue")]
-    b = io.BytesIO()
-    frames[0].save(b, "GIF", save_all=True, append_images=frames[1:])
-    return b.getvalue()
-
-
-def make_zip(path, entries):
-    with zipfile.ZipFile(path, "w") as z:
-        for name, data in entries.items():
-            z.writestr(name, data)
-    return path
+from cbzwebp import core
+from cbzwebp.jobqueue import CANCELLED, DONE, FAILED, SKIPPED, JobQueue
 
 
 class Base(unittest.TestCase):
@@ -61,17 +28,7 @@ class Base(unittest.TestCase):
     def comic(self, name="Vol 01.zip", sub=""):
         d = self.dir / sub
         d.mkdir(parents=True, exist_ok=True)
-        return make_zip(d / name, {
-            "001.jpg": img_bytes("JPEG", quality=95),
-            "002.png": png_transparent(),
-            "003.png": img_bytes("PNG", "P"),
-            "001.png": img_bytes("PNG", "L"),          # collides with 001.jpg -> 001.webp
-            "004.webp": img_bytes("WEBP"),
-            "005.gif": gif_animated(),
-            "ComicInfo.xml": b"<ComicInfo><Title>x</Title></ComicInfo>",
-            "__MACOSX/._001.jpg": b"junk",
-            ".DS_Store": b"junk",
-        })
+        return make_zip(d / name, comic_entries())
 
 
 class ConvertTests(Base):
@@ -84,8 +41,10 @@ class ConvertTests(Base):
         self.assertEqual(res.deleted, str(src))
         with zipfile.ZipFile(dest) as z:
             names = z.namelist()
-            self.assertEqual(names, ["001.webp", "002.webp", "003.webp", "001.png.webp",
-                                     "004.webp", "005.gif", "ComicInfo.xml"])
+            self.assertEqual(
+                names,
+                ["001.webp", "002.webp", "003.webp", "001.png.webp", "004.webp", "005.gif", "ComicInfo.xml"],
+            )
             self.assertEqual(Image.open(io.BytesIO(z.read("002.webp"))).mode, "RGBA")
             self.assertEqual(z.read("ComicInfo.xml"), b"<ComicInfo><Title>x</Title></ComicInfo>")
         self.assertEqual(res.converted, 4)
@@ -151,6 +110,7 @@ class ConvertTests(Base):
         def progress(done, total):
             if done >= 3:
                 cancel.set()
+
         with self.assertRaises(core.Cancelled):
             core.convert_archive(src, 75, pool=self.pool, progress=progress, cancel=cancel)
         self.assertTrue(src.exists())
@@ -202,6 +162,20 @@ class QueueTests(Base):
         q.shutdown()
         self.assertEqual(q.jobs()[0].state, DONE)
         self.assertTrue((self.dir / "A.zip").exists())
+
+    def test_same_output_never_runs_twice_at_once(self):
+        self.comic("A.zip")
+        make_zip(self.dir / "A.cbz", {"1.png": img_bytes("PNG")})
+        q = JobQueue(workers=2, image_threads=2)
+        q.set_paused(True)
+        q.start()
+        q.add([self.dir], 80, overwrite=True)
+        q.set_paused(False)
+        q.wait_idle()
+        q.shutdown()
+        jobs = sorted(q.jobs(), key=lambda j: j.started_at)
+        self.assertEqual([j.state for j in jobs], [DONE, DONE])
+        self.assertLessEqual(jobs[0].finished_at, jobs[1].started_at)
 
 
 if __name__ == "__main__":

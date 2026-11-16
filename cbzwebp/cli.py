@@ -30,23 +30,32 @@ def _quality(v: str) -> int:
 
 def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("-q", "--quality", type=_quality, default=80, help="WebP quality 1-100 (default 80)")
-    p.add_argument("-j", "--jobs", type=int, default=1,
-                   help="archives converted at the same time (default 1)")
-    p.add_argument("-t", "--threads", type=int, default=os.cpu_count(),
-                   help=f"image-encoding threads shared by all jobs (default {os.cpu_count()})")
+    p.add_argument(
+        "-j", "--jobs", type=int, default=1, help="archives converted at the same time (default 1)"
+    )
+    p.add_argument(
+        "-t",
+        "--threads",
+        type=int,
+        default=os.cpu_count(),
+        help=f"image-encoding threads shared by all jobs (default {os.cpu_count()})",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="cbz-webp",
-        description="Recompress images inside .zip/.cbz archives to WebP and save them as .cbz.")
+        description="Recompress images inside .zip/.cbz archives to WebP and save them as .cbz.",
+    )
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("convert", help="scan folders, queue every archive, convert, exit")
     c.add_argument("paths", nargs="+", help="folders (scanned recursively) or archive files")
     _common(c)
-    c.add_argument("--keep", action="store_true", help="keep the original .zip (default: delete after verify)")
+    c.add_argument(
+        "--keep", action="store_true", help="keep the original .zip (default: delete after verify)"
+    )
     c.add_argument("--overwrite", action="store_true", help="replace an existing Name.cbz next to Name.zip")
     c.add_argument("--no-recursive", action="store_true", help="only scan the given folders, not subfolders")
     c.add_argument("--dry-run", action="store_true", help="list what would be queued and exit")
@@ -72,8 +81,10 @@ def cmd_convert(args) -> int:
     if args.dry_run:
         for a in archives:
             print(a)
-        print(f"{len(archives)} archive(s) would be queued at quality {args.quality}"
-              f"{'' if args.keep else '; original .zip files deleted after verify'}.")
+        print(
+            f"{len(archives)} archive(s) would be queued at quality {args.quality}"
+            f"{'' if args.keep else '; original .zip files deleted after verify'}."
+        )
         return 0
 
     total = len(archives)
@@ -98,8 +109,7 @@ def cmd_convert(args) -> int:
                     print(f"        deleted {job.deleted}", flush=True)
 
     q = JobQueue(workers=args.jobs, image_threads=args.threads, on_change=on_change).start()
-    q.add(archives, args.quality, delete_original=not args.keep, overwrite=args.overwrite,
-          recursive=False)
+    q.add(archives, args.quality, delete_original=not args.keep, overwrite=args.overwrite, recursive=False)
 
     def interrupt(*_):
         print("\nCancelling… (originals are left untouched)", flush=True)
@@ -113,8 +123,10 @@ def cmd_convert(args) -> int:
     done = [j for j in jobs if j.state == DONE]
     failed = [j for j in jobs if j.state == FAILED]
     bin_, bout = sum(j.bytes_in for j in done), sum(j.bytes_out for j in done)
-    print(f"\n{len(done)} converted, {sum(j.state == SKIPPED for j in jobs)} skipped, "
-          f"{len(failed)} failed, {sum(j.state == 'cancelled' for j in jobs)} cancelled.")
+    print(
+        f"\n{len(done)} converted, {sum(j.state == SKIPPED for j in jobs)} skipped, "
+        f"{len(failed)} failed, {sum(j.state == 'cancelled' for j in jobs)} cancelled."
+    )
     if bin_:
         print(f"Size {_fmt(bin_)} -> {_fmt(bout)} ({100 * (1 - bout / bin_):.0f}% smaller).")
     if failed:
@@ -136,11 +148,13 @@ def cmd_ui(args) -> int:
         q.shutdown()
         return 2
     url = f"http://127.0.0.1:{args.port}/"
-    print(f"cbz-webp console: {url}  (Ctrl+C to stop; running jobs are cancelled, originals kept)",
-          flush=True)
+    print(
+        f"cbz-webp console: {url}  (Ctrl+C to stop; running jobs are cancelled, originals kept)", flush=True
+    )
 
     def stop(*_):
         raise KeyboardInterrupt
+
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     if args.open:

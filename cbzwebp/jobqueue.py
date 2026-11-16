@@ -11,14 +11,24 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 
 from . import core
 
 QUEUED, RUNNING, DONE, SKIPPED, FAILED, CANCELLED = (
-    "queued", "running", "done", "skipped", "failed", "cancelled")
+    "queued",
+    "running",
+    "done",
+    "skipped",
+    "failed",
+    "cancelled",
+)
 ACTIVE = {QUEUED, RUNNING}
 FINISHED = {DONE, SKIPPED, FAILED, CANCELLED}
+
+
+def _dest(path: str) -> str:
+    return str(Path(path).with_suffix(".cbz")).lower()
 
 
 @dataclass
@@ -49,8 +59,12 @@ class Job:
 
 
 class JobQueue:
-    def __init__(self, workers: int = 1, image_threads: int | None = None,
-                 on_change: Callable[[Job], None] | None = None):
+    def __init__(
+        self,
+        workers: int = 1,
+        image_threads: int | None = None,
+        on_change: Callable[[Job], None] | None = None,
+    ):
         self.workers = max(1, workers)
         self.image_threads = max(1, image_threads or os.cpu_count() or 2)
         self.pool = ThreadPoolExecutor(self.image_threads, thread_name_prefix="webp")
@@ -64,7 +78,7 @@ class JobQueue:
         self._threads: list[threading.Thread] = []
 
     # ------------------------------------------------------------ lifecycle
-    def start(self) -> "JobQueue":
+    def start(self) -> JobQueue:
         for n in range(self.workers):
             t = threading.Thread(target=self._worker, name=f"archive-{n}", daemon=True)
             t.start()
@@ -87,8 +101,15 @@ class JobQueue:
         self.pool.shutdown(wait=True, cancel_futures=True)
 
     # ------------------------------------------------------------ commands
-    def add(self, paths: Iterable[str | Path], quality: int, *, delete_original: bool = True,
-            overwrite: bool = False, recursive: bool = True) -> tuple[list[Job], int]:
+    def add(
+        self,
+        paths: Iterable[str | Path],
+        quality: int,
+        *,
+        delete_original: bool = True,
+        overwrite: bool = False,
+        recursive: bool = True,
+    ) -> tuple[list[Job], int]:
         """Scan paths and enqueue each archive not already queued/running. Returns (added, dupes)."""
         if not 1 <= int(quality) <= 100:
             raise ValueError("quality must be 1-100")
@@ -183,14 +204,29 @@ class JobQueue:
     def _finish(self, job: Job, state: str, message: str) -> None:
         job.state, job.message, job.finished_at = state, message, time.time()
 
+    def _next_runnable(self) -> Job | None:
+        """First pending job whose output file no running job is writing.
+
+        ``Name.zip`` and ``Name.cbz`` both write ``Name.cbz(.part)``; running them at once
+        would corrupt the output. Call with the lock held.
+        """
+        busy = {_dest(j.path) for j in self._jobs.values() if j.state == RUNNING}
+        for jid in self._pending:
+            if _dest(self._jobs[jid].path) not in busy:
+                self._pending.remove(jid)
+                return self._jobs[jid]
+        return None
+
     def _worker(self) -> None:
         while True:
             with self._cond:
-                while not self._stopping and (self._paused or not self._pending):
+                job = None
+                while not self._stopping:
+                    if not self._paused and (job := self._next_runnable()):
+                        break
                     self._cond.wait()
                 if self._stopping:
                     return
-                job = self._jobs[self._pending.popleft()]
                 job.state, job.started_at, job.message = RUNNING, time.time(), ""
             self._emit(job)
             self._run(job)
@@ -204,9 +240,14 @@ class JobQueue:
 
         try:
             res = core.convert_archive(
-                Path(job.path), job.quality, pool=self.pool,
-                delete_original=job.delete_original, overwrite=job.overwrite,
-                progress=progress, cancel=job.cancel)
+                Path(job.path),
+                job.quality,
+                pool=self.pool,
+                delete_original=job.delete_original,
+                overwrite=job.overwrite,
+                progress=progress,
+                cancel=job.cancel,
+            )
         except core.Cancelled:
             self._finish(job, CANCELLED, "cancelled; original untouched")
         except core.ConvertError as e:

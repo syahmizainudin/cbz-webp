@@ -1,14 +1,23 @@
 # cbz-webp
 
+[![CI](https://github.com/syahmizainudin/cbz-webp/actions/workflows/ci.yml/badge.svg)](https://github.com/syahmizainudin/cbz-webp/actions/workflows/ci.yml)
+
 `cbz-webp` goes through a folder, recompresses the images inside every `.zip` and `.cbz` archive to WebP at the quality you choose, and saves each result as a `.cbz`. Archives go through a queue, which you drive from the command line or from a local web page.
 
 ## Install
 
-Needs Python 3.10 or later and Pillow with WebP support (`pip install --user pillow`).
+Needs Python 3.10 or later. Pick one:
 
 ```bash
-ln -s /app/tools/cbz-webp/bin/cbz-webp ~/.local/bin/cbz-webp
+# From GitHub with pipx (installs Pillow for you)
+pipx install git+https://github.com/syahmizainudin/cbz-webp
+
+# Or from a checkout; needs Pillow with WebP support (sudo apt install python3-pil, or pip)
+git clone https://github.com/syahmizainudin/cbz-webp.git
+ln -s "$PWD/cbz-webp/bin/cbz-webp" ~/.local/bin/cbz-webp
 ```
+
+Each [release](https://github.com/syahmizainudin/cbz-webp/releases) also has a wheel you can install with `pipx install cbz_webp-<version>-py3-none-any.whl`.
 
 ## Commands
 
@@ -71,8 +80,11 @@ Inside each archive:
 
 If any step fails, or you cancel, the tool removes the `.part` and does not touch the original.
 
-## Tests
+## Development
 
 ```bash
-cd /app/tools/cbz-webp && python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests       # tests
+ruff check . && ruff format --check .        # lint, same as CI
 ```
+
+GitHub Actions runs lint, the tests on Python 3.10 to 3.14, and a package smoke test on every push to `main` and every pull request. Pushing a `v<version>` tag publishes a GitHub release; the steps are in [AGENTS.md](AGENTS.md#releasing), which also holds the rules for changing the code. Changes are listed in [CHANGELOG.md](CHANGELOG.md).

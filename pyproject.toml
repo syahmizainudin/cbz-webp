@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cbz-webp"
+dynamic = ["version"]
+description = "Recompress images in .zip/.cbz archives to WebP and save them as .cbz, with a job queue"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pillow>=10.0"]
+
+[project.scripts]
+cbz-webp = "cbzwebp.cli:main"
+
+[tool.setuptools]
+packages = ["cbzwebp"]
+
+[tool.setuptools.package-data]
+cbzwebp = ["ui.html"]
+
+[tool.setuptools.dynamic]
+version = { attr = "cbzwebp.__version__" }
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "BLE", "UP", "RUF"]
+ignore = [
+  "RUF001",  # ambiguous unicode in strings: the "…" in messages is intended
+]

@@ -19,7 +19,7 @@ from collections import deque
 from concurrent.futures import Executor, Future
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -56,6 +56,7 @@ class Result:
 
 # ---------------------------------------------------------------- scanning
 
+
 def normalize_path(raw: str) -> Path:
     """Accept POSIX paths and, for WSL users, Windows paths like ``C:\\Comics``."""
     raw = raw.strip().strip('"').strip("'")
@@ -88,6 +89,7 @@ def scan(paths: Iterable[str | Path], recursive: bool = True) -> list[Path]:
 
 
 # ---------------------------------------------------------------- images
+
 
 def _ext(name: str) -> str:
     return PurePosixPath(name).suffix.lower()
@@ -127,6 +129,7 @@ def encode_webp(data: bytes, quality: int, method: int = 4) -> tuple[bytes | Non
 
 # ---------------------------------------------------------------- archives
 
+
 @dataclass
 class _Entry:
     info: zipfile.ZipInfo
@@ -162,7 +165,7 @@ def _verify(part: Path, expected: list[str], webp_names: set[str]) -> None:
             try:
                 with Image.open(io.BytesIO(z.read(n))) as im:
                     im.load()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 raise ConvertError(f"verify: {n} does not decode ({e})") from e
 
 
@@ -219,7 +222,7 @@ def convert_archive(
                         webp, reason = fut.result()
                     except UnidentifiedImageError as e:
                         raise ConvertError(f"{entry.info.filename}: not a readable image") from e
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         raise ConvertError(f"{entry.info.filename}: cannot decode ({e})") from e
                     if webp is None:
                         res.kept.append(f"{entry.info.filename}: {reason}")
