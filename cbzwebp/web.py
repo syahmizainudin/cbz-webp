@@ -1,30 +1,59 @@
-"""Local web console for the convert and download queues (stdlib http.server, bound to 127.0.0.1)."""
+"""Local web console (stdlib http.server, bound to 127.0.0.1).
+
+The server is generic so other tools can combine features on one page: ``serve`` takes the
+page HTML and a map of URL prefix -> API object. An API object has
+
+    state() -> dict                         merged into GET /api/state
+    post(action, body) -> (status, dict)    POST <prefix><action>
+
+The server adds the request guards, ``GET /api/dirs`` for the folder picker, and turns
+``ValueError``/``OSError``/``KeyError`` from an API into a 400.
+
+dl-queue has an identical copy of the generic part (it can't depend on this package, which needs
+Pillow); keep the two in step.
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import string
+from collections.abc import Iterable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import parse_qs, urlsplit
 
-from . import core
-from .download import Auth, DownloadQueue
+from .core import ARCHIVE_EXTS, normalize_path
 from .jobqueue import JobQueue
 
 UI_HTML = (Path(__file__).parent / "ui.html").read_bytes()
 
 
-def list_dirs(raw: str | None) -> dict:
-    """Folders inside ``raw`` (default: home) for the page's folder picker. Read-only."""
-    p = core.normalize_path(raw) if raw and raw.strip() else Path.home()
+# ---------------------------------------------------------------- generic server part
+# Everything from here to "end of generic server part" is identical in dl-queue's web.py.
+
+
+class API(Protocol):
+    def state(self) -> dict: ...
+
+    def post(self, action: str, body: dict) -> tuple[int, dict]: ...
+
+
+def list_dirs(raw: str | None, count_exts: Iterable[str] | None = None) -> dict:
+    """Folders inside ``raw`` (default: home) for the page's folder picker. Read-only.
+
+    ``files`` counts the files directly inside with an extension in ``count_exts`` (all files
+    when None).
+    """
+    p = normalize_path(raw) if raw and raw.strip() else Path.home().resolve()
     if not p.exists():
         raise ValueError(f"not found: {p}")
     if not p.is_dir():
         raise ValueError(f"not a folder: {p}")
-    dirs, archives = [], 0
+    exts = None if count_exts is None else {e.lower() for e in count_exts}
+    dirs, files = [], 0
     with os.scandir(p) as it:
         for e in it:
             if e.name.startswith("."):
@@ -32,8 +61,8 @@ def list_dirs(raw: str | None) -> dict:
             try:
                 if e.is_dir():
                     dirs.append(e.name)
-                elif Path(e.name).suffix.lower() in core.ARCHIVE_EXTS:
-                    archives += 1
+                elif exts is None or Path(e.name).suffix.lower() in exts:
+                    files += 1
             except OSError:
                 continue
     shortcuts = [{"label": "Home", "path": str(Path.home())}]
@@ -45,19 +74,21 @@ def list_dirs(raw: str | None) -> dict:
         "path": str(p),
         "parent": str(p.parent) if p.parent != p else None,
         "dirs": sorted(dirs, key=str.lower),
-        "archives": archives,
+        "files": files,
         "shortcuts": shortcuts,
     }
 
 
-def make_handler(queue: JobQueue, defaults: dict, downloads: DownloadQueue | None = None):
+def make_handler(page: bytes, apis: dict[str, API], count_exts: Iterable[str] | None = None):
+    # Longest prefix first, so a more specific prefix ("/api/download/") wins over "/api/".
+    routes = sorted(apis.items(), key=lambda kv: len(kv[0]), reverse=True)
+
     class Handler(BaseHTTPRequestHandler):
-        server_version = "cbz-webp"
+        server_version = "local-console"
 
         def log_message(self, fmt, *args):  # keep the terminal quiet
             pass
 
-        # ---------------------------------------------------- helpers
         def _send(self, status: int, body: bytes, ctype: str) -> None:
             self.send_response(status)
             self.send_header("Content-Type", ctype)
@@ -81,32 +112,22 @@ def make_handler(queue: JobQueue, defaults: dict, downloads: DownloadQueue | Non
                 return True
             return urlsplit(origin).netloc == self.headers.get("Host")
 
-        def _state(self) -> dict:
-            return {
-                "jobs": queue.snapshot(),
-                "paused": queue.paused,
-                "workers": queue.workers,
-                "image_threads": queue.image_threads,
-                "defaults": defaults,
-                "downloads": downloads.snapshot() if downloads else [],
-                "downloads_paused": downloads.paused if downloads else False,
-                "download_workers": downloads.workers if downloads else 0,
-            }
-
-        # ---------------------------------------------------- routes
         def do_GET(self):
+            # Checking Host also stops DNS rebinding from reading the API.
             if not self._host_ok():
                 return self._send(HTTPStatus.FORBIDDEN, b"bad host", "text/plain")
             url = urlsplit(self.path)
-            path = url.path
-            if path == "/":
-                return self._send(200, UI_HTML, "text/html; charset=utf-8")
-            if path == "/api/state":
-                return self._json(self._state())
-            if path == "/api/dirs":
+            if url.path == "/":
+                return self._send(200, page, "text/html; charset=utf-8")
+            if url.path == "/api/state":
+                state: dict = {}
+                for _, api in routes:
+                    state.update(api.state())
+                return self._json(state)
+            if url.path == "/api/dirs":
                 try:
                     raw = parse_qs(url.query).get("path", [""])[0]
-                    return self._json(list_dirs(raw))
+                    return self._json(list_dirs(raw, count_exts))
                 except (OSError, ValueError) as e:
                     return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
             self._send(HTTPStatus.NOT_FOUND, b"not found", "text/plain")
@@ -120,75 +141,86 @@ def make_handler(queue: JobQueue, defaults: dict, downloads: DownloadQueue | Non
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length) or b"{}")
-            except (ValueError, json.JSONDecodeError):
+                if not isinstance(body, dict):
+                    raise ValueError("body must be a JSON object")
+            except ValueError:
                 return self._json({"error": "bad JSON"}, HTTPStatus.BAD_REQUEST)
 
             path = urlsplit(self.path).path
-            try:
-                if path == "/api/add":
-                    paths = [p for p in body.get("paths", []) if str(p).strip()]
-                    if not paths:
-                        return self._json({"error": "give at least one folder or file"}, 400)
-                    added, dupes = queue.add(
-                        paths,
-                        int(body.get("quality", defaults["quality"])),
-                        delete_original=bool(body.get("delete_original", True)),
-                        overwrite=bool(body.get("overwrite", False)),
-                        recursive=bool(body.get("recursive", True)),
-                    )
-                    return self._json({"added": len(added), "duplicates": dupes})
-                if path == "/api/cancel":
-                    return self._json({"ok": queue.cancel(int(body["id"]))})
-                if path == "/api/cancel-all":
-                    return self._json({"cancelled": queue.cancel_all()})
-                if path == "/api/retry":
-                    return self._json({"ok": queue.retry(int(body["id"]))})
-                if path == "/api/clear":
-                    return self._json({"cleared": queue.clear_finished()})
-                if path == "/api/pause":
-                    queue.set_paused(bool(body.get("paused", True)))
-                    return self._json({"paused": queue.paused})
-                if path.startswith("/api/download/") and downloads:
-                    return self._download(path.removeprefix("/api/download/"), body)
-            except (OSError, ValueError, KeyError) as e:
-                return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+            for prefix, api in routes:
+                if path.startswith(prefix) and "/" not in path[len(prefix) :]:
+                    try:
+                        status, obj = api.post(path[len(prefix) :], body)
+                    except (OSError, ValueError, KeyError, TypeError) as e:
+                        return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+                    return self._json(obj, status)
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-
-        def _download(self, action: str, body: dict):
-            if action == "add":
-                urls = body.get("urls", [])
-                if not isinstance(urls, list):
-                    raise ValueError("urls must be a list")
-                a = body.get("auth") or {}
-                auth = Auth(str(a.get("mode", "none")), str(a.get("key", "")), str(a.get("name", "")))
-                added, dupes = downloads.add(
-                    [str(u) for u in urls],
-                    str(body.get("dest", "")).strip() or "",
-                    auth,
-                    convert=bool(body.get("convert", True)),
-                    quality=int(body.get("quality", defaults["quality"])),
-                    delete_original=bool(body.get("delete_original", True)),
-                )
-                return self._json({"added": len(added), "duplicates": dupes})
-            if action == "cancel":
-                return self._json({"ok": downloads.cancel(int(body["id"]))})
-            if action == "cancel-all":
-                return self._json({"cancelled": downloads.cancel_all()})
-            if action == "retry":
-                return self._json({"ok": downloads.retry(int(body["id"]))})
-            if action == "clear":
-                return self._json({"cleared": downloads.clear_finished()})
-            if action == "pause":
-                downloads.set_paused(bool(body.get("paused", True)))
-                return self._json({"paused": downloads.paused})
-            return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     return Handler
 
 
 def serve(
-    queue: JobQueue, port: int, defaults: dict, downloads: DownloadQueue | None = None
+    port: int, page: bytes, apis: dict[str, API], count_exts: Iterable[str] | None = None
 ) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(queue, defaults, downloads))
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(page, apis, count_exts))
     server.daemon_threads = True
     return server
+
+
+# ---------------------------------------------------------------- end of generic server part
+
+
+def serve_convert(port: int, queue: JobQueue, defaults: dict) -> ThreadingHTTPServer:
+    """This package's console: the convert page, with the picker counting .zip/.cbz files."""
+    return serve(port, UI_HTML, {"/api/": ConvertAPI(queue, defaults)}, ARCHIVE_EXTS)
+
+
+# ---------------------------------------------------------------- convert API
+
+
+class ConvertAPI:
+    """The convert queue's endpoints, mounted at ``/api/`` by this package's page."""
+
+    def __init__(self, queue: JobQueue, defaults: dict):
+        self.queue = queue
+        self.defaults = defaults
+
+    def state(self) -> dict:
+        q = self.queue
+        return {
+            "jobs": q.snapshot(),
+            "paused": q.paused,
+            "workers": q.workers,
+            "image_threads": q.image_threads,
+            "defaults": self.defaults,
+        }
+
+    def post(self, action: str, body: dict) -> tuple[int, dict]:
+        q = self.queue
+        if action == "add":
+            paths = body.get("paths", [])
+            if not isinstance(paths, list):
+                raise ValueError("paths must be a list")
+            paths = [str(p) for p in paths if str(p).strip()]
+            if not paths:
+                raise ValueError("give at least one folder or file")
+            added, dupes = q.add(
+                paths,
+                int(body.get("quality", self.defaults["quality"])),
+                delete_original=bool(body.get("delete_original", True)),
+                overwrite=bool(body.get("overwrite", False)),
+                recursive=bool(body.get("recursive", True)),
+            )
+            return 200, {"added": len(added), "duplicates": dupes}
+        if action == "cancel":
+            return 200, {"ok": q.cancel(int(body["id"]))}
+        if action == "cancel-all":
+            return 200, {"cancelled": q.cancel_all()}
+        if action == "retry":
+            return 200, {"ok": q.retry(int(body["id"]))}
+        if action == "clear":
+            return 200, {"cleared": q.clear_finished()}
+        if action == "pause":
+            q.set_paused(bool(body.get("paused", True)))
+            return 200, {"paused": q.paused}
+        return 404, {"error": "not found"}

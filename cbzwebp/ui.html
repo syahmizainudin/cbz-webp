@@ -23,13 +23,6 @@
   main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .sub { color: var(--muted); margin: 0 0 16px; }
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
-  .tab { border: none; background: none; border-radius: 0; padding: 8px 14px; color: var(--muted); font-weight: 600;
-         border-bottom: 2px solid transparent; margin-bottom: -1px; }
-  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-  .badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 6px; border-radius: 999px;
-           background: var(--accent); color: var(--accent-text); font-size: 11px; line-height: 18px; text-align: center; }
-  .badge:empty { display: none; }
   [hidden] { display: none !important; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
   label, .label { display: block; font-weight: 600; margin-bottom: 6px; }
@@ -99,12 +92,7 @@
 <body>
 <main>
   <h1>CBZ WebP Queue</h1>
-  <p class="sub">Recompress images inside .zip / .cbz archives to WebP and save them as .cbz, or download files and convert them as they arrive.</p>
-
-  <div class="tabs" role="tablist">
-    <button class="tab" role="tab" id="tab-convert" aria-controls="pane-convert" data-tab="convert">Convert<span class="badge" id="badge-convert"></span></button>
-    <button class="tab" role="tab" id="tab-download" aria-controls="pane-download" data-tab="download">Download<span class="badge" id="badge-download"></span></button>
-  </div>
+  <p class="sub">Recompress images inside .zip / .cbz archives to WebP and save them as .cbz.</p>
 
   <!-- ===================== Convert ===================== -->
   <div id="pane-convert" role="tabpanel" aria-labelledby="tab-convert">
@@ -143,68 +131,6 @@
     </section>
   </div>
 
-  <!-- ===================== Download ===================== -->
-  <div id="pane-download" role="tabpanel" aria-labelledby="tab-download" hidden>
-    <section class="panel">
-      <label for="urls">File URLs (one per line)</label>
-      <textarea id="urls" placeholder="https://example.com/files/Chapter%2001.zip"></textarea>
-
-      <div class="grid">
-        <div>
-          <label for="dest">Save to folder</label>
-          <div class="field">
-            <input type="text" id="dest" class="mono" placeholder="/mnt/d/Downloads/Comics">
-            <button class="small" id="browseDest" type="button">Open folder…</button>
-          </div>
-        </div>
-        <div>
-          <label for="authMode">API key sent as</label>
-          <div class="field">
-            <select id="authMode">
-              <option value="bearer">Authorization: Bearer &lt;key&gt;</option>
-              <option value="header">Custom header</option>
-              <option value="query">Query parameter</option>
-              <option value="none">No API key</option>
-            </select>
-            <input type="text" id="authName" class="mono" placeholder="X-API-Key" hidden aria-label="Header or parameter name">
-          </div>
-        </div>
-      </div>
-
-      <div class="grid" id="keyRow">
-        <div>
-          <label for="apiKey">API key</label>
-          <div class="field">
-            <input type="password" id="apiKey" class="mono" autocomplete="off" spellcheck="false">
-            <button class="small" id="showKey" type="button">Show</button>
-          </div>
-          <label class="check" style="margin-top:6px"><input type="checkbox" id="rememberKey"> Remember the key in this browser</label>
-        </div>
-      </div>
-
-      <div class="row">
-        <label class="check"><input type="checkbox" id="dlConvert" checked> Convert .zip / .cbz downloads to WebP .cbz</label>
-        <span class="note" id="dlConvertNote"></span>
-        <button class="primary" id="dlAdd">Add to queue</button>
-      </div>
-      <div class="msg" id="dlMsg"></div>
-    </section>
-
-    <section class="panel">
-      <div class="bar-head">
-        <div class="stats" id="dlStats"></div>
-        <div class="actions">
-          <button id="dlPause">Pause</button>
-          <button id="dlCancelAll">Cancel all</button>
-          <button id="dlClear">Clear finished</button>
-        </div>
-      </div>
-      <table>
-        <thead><tr><th>File</th><th>State</th><th>Size</th><th>Details</th><th></th></tr></thead>
-        <tbody id="dlRows"><tr><td colspan="5" class="empty">No downloads yet.</td></tr></tbody>
-      </table>
-    </section>
-  </div>
 </main>
 
 <!-- ===================== Folder picker ===================== -->
@@ -235,7 +161,7 @@ const store = {
   get(k, d = null) { try { const v = localStorage.getItem("cbzwebp." + k); return v === null ? d : v; } catch { return d; } },
   set(k, v) { try { v === null ? localStorage.removeItem("cbzwebp." + k) : localStorage.setItem("cbzwebp." + k, v); } catch {} },
 };
-let paused = false, dlPaused = false, defaultsSet = false;
+let paused = false, defaultsSet = false;
 
 function fmt(n) {
   if (!n) return "–";
@@ -255,20 +181,8 @@ async function api(path, body) {
 }
 function say(el, text, err) { el.textContent = text; el.className = "msg" + (err ? " err" : ""); }
 
-/* ---------- tabs ---------- */
-function showTab(name) {
-  for (const t of document.querySelectorAll(".tab")) {
-    const on = t.dataset.tab === name;
-    t.setAttribute("aria-selected", on);
-    $("pane-" + t.dataset.tab).hidden = !on;
-  }
-  store.set("tab", name);
-}
-for (const t of document.querySelectorAll(".tab")) t.onclick = () => showTab(t.dataset.tab);
-showTab(store.get("tab", "convert") === "download" ? "download" : "convert");
-
 /* ---------- folder picker ---------- */
-let pickerTarget = null, pickerCurrent = null;
+let pickerCurrent = null;
 async function pickerLoad(path) {
   try {
     const r = await api("/api/dirs?path=" + encodeURIComponent(path || ""));
@@ -280,13 +194,12 @@ async function pickerLoad(path) {
     $("pickerList").innerHTML = r.dirs.length
       ? r.dirs.map(d => `<li><button type="button" data-dir="${esc(d)}">📁 ${esc(d)}</button></li>`).join("")
       : `<li class="empty">No subfolders.</li>`;
-    $("pickerInfo").textContent = r.archives ? `${r.archives} .zip/.cbz file(s) in this folder` : "No .zip/.cbz files directly in this folder";
+    $("pickerInfo").textContent = r.files ? `${r.files} .zip/.cbz file(s) in this folder` : "No .zip/.cbz files directly in this folder";
     say($("pickerMsg"), "");
   } catch (e) { say($("pickerMsg"), e.message, true); }
 }
-function openPicker(target, start) {
-  pickerTarget = target;
-  $("pickerTitle").textContent = target === "convert" ? "Choose a folder to convert" : "Choose where to save downloads";
+function openPicker(start) {
+  $("pickerTitle").textContent = "Choose a folder to convert";
   $("picker").showModal();
   pickerLoad(start || store.get("lastDir", ""));
 }
@@ -302,25 +215,19 @@ $("pickerUse").onclick = () => {
   if (!pickerCurrent) return;
   const p = pickerCurrent.path;
   store.set("lastDir", p);
-  if (pickerTarget === "convert") {
-    const lines = $("paths").value.split("\n").map(s => s.trim()).filter(Boolean);
-    if (!lines.includes(p)) lines.push(p);
-    $("paths").value = lines.join("\n");
-  } else {
-    $("dest").value = p; store.set("dest", p);
-  }
+  const lines = $("paths").value.split("\n").map(s => s.trim()).filter(Boolean);
+  if (!lines.includes(p)) lines.push(p);
+  $("paths").value = lines.join("\n");
   $("picker").close();
 };
 $("browseConvert").onclick = () => {
   const lines = $("paths").value.split("\n").map(s => s.trim()).filter(Boolean);
-  openPicker("convert", lines[lines.length - 1]);
+  openPicker(lines[lines.length - 1]);
 };
-$("browseDest").onclick = () => openPicker("download", $("dest").value.trim());
 
 /* ---------- convert form ---------- */
-$("qr").oninput = () => { $("qn").value = $("qr").value; convertNote(); };
-$("qn").oninput = () => { $("qr").value = $("qn").value; convertNote(); };
-$("del").onchange = convertNote;
+$("qr").oninput = () => $("qn").value = $("qr").value;
+$("qn").oninput = () => $("qr").value = $("qn").value;
 
 $("add").onclick = async () => {
   const paths = $("paths").value.split("\n").map(s => s.trim()).filter(Boolean);
@@ -343,69 +250,6 @@ $("rows").onclick = async ev => {
   await api("/api/" + b.dataset.act, { id: +b.dataset.id }); refresh();
 };
 
-/* ---------- download form ---------- */
-$("dest").value = store.get("dest", "");
-$("authMode").value = store.get("authMode", "bearer");
-$("authName").value = store.get("authName", "");
-if (store.get("apiKey")) { $("apiKey").value = store.get("apiKey"); $("rememberKey").checked = true; }
-
-function authUI() {
-  const m = $("authMode").value;
-  $("authName").hidden = !(m === "header" || m === "query");
-  $("authName").placeholder = m === "query" ? "api_key" : "X-API-Key";
-  $("keyRow").hidden = m === "none";
-}
-function saveKey() { store.set("apiKey", $("rememberKey").checked && $("apiKey").value ? $("apiKey").value : null); }
-function convertNote() {
-  $("dlConvertNote").textContent = $("dlConvert").checked
-    ? `Uses the Convert tab's settings: quality ${$("qn").value || "–"}%, ${$("del").checked ? "downloaded .zip deleted after verify" : "downloaded .zip kept"}.`
-    : "Files are only saved.";
-}
-$("authMode").onchange = () => { store.set("authMode", $("authMode").value); authUI(); };
-$("authName").oninput = () => store.set("authName", $("authName").value.trim());
-$("dest").onchange = () => store.set("dest", $("dest").value.trim());
-$("rememberKey").onchange = saveKey;
-$("apiKey").oninput = saveKey;
-$("showKey").onclick = () => {
-  const show = $("apiKey").type === "password";
-  $("apiKey").type = show ? "text" : "password";
-  $("showKey").textContent = show ? "Hide" : "Show";
-};
-$("dlConvert").onchange = convertNote;
-authUI();
-
-$("dlAdd").onclick = async () => {
-  const urls = $("urls").value.split("\n").map(s => s.trim()).filter(Boolean);
-  const dest = $("dest").value.trim();
-  const mode = $("authMode").value;
-  if (!urls.length) return say($("dlMsg"), "Enter at least one URL.", true);
-  if (!dest) return say($("dlMsg"), "Choose a folder to save to.", true);
-  if (mode !== "none" && !$("apiKey").value) return say($("dlMsg"), "Enter the API key, or choose “No API key”.", true);
-  if ((mode === "header" || mode === "query") && !$("authName").value.trim())
-    return say($("dlMsg"), `Enter the ${mode === "header" ? "header" : "parameter"} name.`, true);
-  try {
-    const r = await api("/api/download/add", {
-      urls, dest, convert: $("dlConvert").checked,
-      quality: parseInt($("qn").value, 10), delete_original: $("del").checked,
-      auth: { mode, key: $("apiKey").value, name: $("authName").value.trim() },
-    });
-    store.set("dest", dest);
-    say($("dlMsg"), `Queued ${r.added} download(s)` + (r.duplicates ? `, ${r.duplicates} already in queue` : "") + ".");
-    $("urls").value = "";
-    refresh();
-  } catch (e) { say($("dlMsg"), e.message, true); }
-};
-$("dlPause").onclick = async () => { await api("/api/download/pause", { paused: !dlPaused }); refresh(); };
-$("dlClear").onclick = async () => { await api("/api/download/clear", {}); refresh(); };
-$("dlCancelAll").onclick = async () => {
-  if (confirm("Cancel every queued and running download?")) { await api("/api/download/cancel-all", {}); refresh(); }
-};
-$("dlRows").onclick = async ev => {
-  const b = ev.target.closest("button[data-act]"); if (!b) return;
-  if (b.dataset.act === "goto") { showTab("convert"); return; }
-  await api("/api/download/" + b.dataset.act, { id: +b.dataset.id }); refresh();
-};
-
 /* ---------- rendering ---------- */
 function counts(jobs) { const c = {}; for (const j of jobs) c[j.state] = (c[j.state] || 0) + 1; return c; }
 function chipsFor(c) {
@@ -425,7 +269,6 @@ function renderConvert(st) {
   if (bin) chips.push(`<span class="chip">saved <b>${fmt(bin - bout)}</b> (${Math.round(100 * (1 - bout / bin))}%)</span>`);
   chips.push(`<span class="chip">${st.workers} archive worker(s) · ${st.image_threads} image threads${paused ? " · <b>paused</b>" : ""}</span>`);
   $("stats").innerHTML = chips.join("");
-  $("badge-convert").textContent = (c.queued || 0) + (c.running || 0) || "";
 
   if (!st.jobs.length) { $("rows").innerHTML = `<tr><td colspan="6" class="empty">Queue is empty.</td></tr>`; return; }
   $("rows").innerHTML = st.jobs.map(j => {
@@ -443,46 +286,9 @@ function renderConvert(st) {
   }).join("");
 }
 
-function renderDownloads(st) {
-  dlPaused = st.downloads_paused;
-  $("dlPause").textContent = dlPaused ? "Resume" : "Pause";
-  const jobs = st.downloads, c = counts(jobs);
-  const got = jobs.filter(j => j.state === "done").reduce((s, j) => s + j.done, 0);
-  const chips = chipsFor(c);
-  if (got) chips.push(`<span class="chip">downloaded <b>${fmt(got)}</b></span>`);
-  chips.push(`<span class="chip">${st.download_workers} download(s) at a time${dlPaused ? " · <b>paused</b>" : ""}</span>`);
-  $("dlStats").innerHTML = chips.join("");
-  $("badge-download").textContent = (c.queued || 0) + (c.running || 0) || "";
-
-  if (!jobs.length) { $("dlRows").innerHTML = `<tr><td colspan="5" class="empty">No downloads yet.</td></tr>`; return; }
-  const convById = Object.fromEntries(st.jobs.map(j => [j.id, j]));
-  $("dlRows").innerHTML = jobs.map(j => {
-    let prog = "";
-    if (j.state === "running") {
-      prog = j.total
-        ? `<div class="prog"><i style="width:${Math.round(100 * j.done / j.total)}%"></i></div><span class="note">${Math.round(100 * j.done / j.total)}%</span>`
-        : `<div class="prog indet"><i></i></div>`;
-    }
-    const size = j.state === "running" ? `${fmt(j.done)}${j.total ? " / " + fmt(j.total) : ""}` : (j.done ? fmt(j.done) : "–");
-    let det = esc(j.message);
-    if (j.output) det += `<div class="note">${esc(j.output)}</div>`;
-    if (j.convert_job_id) {
-      const cj = convById[j.convert_job_id];
-      det += cj
-        ? `<div class="note">convert: <span class="state s-${cj.state}">${cj.state}</span> ${cj.state === "running" ? `${cj.done}/${cj.total}` : esc(cj.message)} <button class="link" data-act="goto">view</button></div>`
-        : `<div class="note">convert job cleared</div>`;
-    }
-    const auth = j.auth_mode !== "none" ? ` <span class="note">· key: ${esc(j.auth_mode)}</span>` : "";
-    return `<tr><td class="name">${esc(j.name)}<div class="dir">${esc(j.url)}</div><div class="dir">→ ${esc(j.dest_dir)}${auth}</div></td>
-      <td><span class="state s-${j.state}">${j.state}</span>${prog}</td>
-      <td class="size">${size}</td><td>${det}</td><td>${actionBtn(j)}</td></tr>`;
-  }).join("");
-}
-
 function render(st) {
-  if (!defaultsSet) { $("qr").value = $("qn").value = st.defaults.quality; defaultsSet = true; convertNote(); }
+  if (!defaultsSet) { $("qr").value = $("qn").value = st.defaults.quality; defaultsSet = true; }
   renderConvert(st);
-  renderDownloads(st);
 }
 
 async function refresh() {

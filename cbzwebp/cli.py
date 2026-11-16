@@ -63,9 +63,6 @@ def build_parser() -> argparse.ArgumentParser:
     u = sub.add_parser("ui", help="start the local web console")
     _common(u)
     u.add_argument("-p", "--port", type=int, default=8765, help="port on 127.0.0.1 (default 8765)")
-    u.add_argument(
-        "-d", "--downloads", type=int, default=2, help="downloads running at the same time (default 2)"
-    )
     u.add_argument("--open", action="store_true", help="open the console in a browser")
     u.add_argument("paths", nargs="*", help="optional folders to queue at start-up")
     u.add_argument("--keep", action="store_true", help="for start-up paths: keep the original .zip")
@@ -138,19 +135,16 @@ def cmd_convert(args) -> int:
 
 
 def cmd_ui(args) -> int:
-    from .download import DownloadQueue
-    from .web import serve
+    from .web import serve_convert
 
     q = JobQueue(workers=args.jobs, image_threads=args.threads).start()
-    dq = DownloadQueue(workers=max(1, args.downloads), convert_queue=q).start()
     if args.paths:
         added, _ = q.add(args.paths, args.quality, delete_original=not args.keep)
         print(f"Queued {len(added)} archive(s).")
     try:
-        server = serve(q, args.port, {"quality": args.quality}, downloads=dq)
+        server = serve_convert(args.port, q, {"quality": args.quality})
     except OSError as e:
         print(f"cbz-webp: cannot listen on 127.0.0.1:{args.port}: {e}", file=sys.stderr)
-        dq.shutdown()
         q.shutdown()
         return 2
     url = f"http://127.0.0.1:{args.port}/"
@@ -171,7 +165,6 @@ def cmd_ui(args) -> int:
         print("\nStopping…", flush=True)
     finally:
         server.server_close()
-        dq.shutdown()
         q.shutdown()
     return 0
 

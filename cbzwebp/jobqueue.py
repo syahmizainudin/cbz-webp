@@ -1,8 +1,8 @@
 """In-memory job queues.
 
-``BaseQueue`` holds the pending list, workers, pause, cancel, retry and clear. ``JobQueue``
-converts archives (worker threads + one shared image-encoding pool); ``download.DownloadQueue``
-fetches files.
+``BaseQueue`` holds the pending list, workers, pause, cancel, retry and clear; ``JobQueue``
+converts archives (worker threads + one shared image-encoding pool). dl-queue has the same
+``BaseQueue`` in ``dlqueue/basequeue.py``; keep the two in step.
 """
 
 from __future__ import annotations
@@ -177,7 +177,7 @@ class BaseQueue:
         with self._cond:
             return [j.to_dict() for j in self._jobs.values()]
 
-    def jobs(self) -> list[Job]:
+    def jobs(self) -> list:
         with self._cond:
             return list(self._jobs.values())
 
@@ -187,14 +187,14 @@ class BaseQueue:
                 self._cond.wait(poll)
 
     # ------------------------------------------------------------ internals
-    def _emit(self, job: Job) -> None:
+    def _emit(self, job) -> None:
         if self.on_change:
             try:
                 self.on_change(job)
             except Exception:  # noqa: BLE001 - a broken listener must not kill a worker
                 traceback.print_exc()
 
-    def _finish(self, job: Job, state: str, message: str) -> None:
+    def _finish(self, job, state: str, message: str) -> None:
         job.state, job.message, job.finished_at = state, message, time.time()
 
     def _dedup_key(self, job):

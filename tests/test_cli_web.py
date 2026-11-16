@@ -11,12 +11,11 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-from helpers import FileServer, comic_entries, img_bytes, make_zip
+from helpers import comic_entries, img_bytes, make_zip
 
 from cbzwebp import __version__, cli
-from cbzwebp.download import DownloadQueue
 from cbzwebp.jobqueue import CANCELLED, DONE, FAILED, JobQueue
-from cbzwebp.web import serve
+from cbzwebp.web import ConvertAPI, UI_HTML, serve, serve_convert
 
 
 def run_cli(*argv):
@@ -110,20 +109,18 @@ class CliTests(TmpDir):
 
 
 class WebBase(TmpDir):
-    """Starts the console server with both queues on a free port."""
+    """Starts the console server on a free port."""
 
     def setUp(self):
         super().setUp()
         self.queue = JobQueue(workers=1, image_threads=2).start()
-        self.downloads = DownloadQueue(workers=1, convert_queue=self.queue, timeout=10).start()
-        self.server = serve(self.queue, 0, {"quality": 80}, downloads=self.downloads)
+        self.server = serve_convert(0, self.queue, {"quality": 80})
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
-        self.downloads.shutdown()
         self.queue.shutdown()
         super().tearDown()
 
@@ -224,8 +221,8 @@ class WebTests(WebBase):
         self.assertEqual(self.post("/api/clear", headers={"Host": "evil.example"})[0], 403)
 
 
-class WebFolderAndDownloadTests(WebBase):
-    """Folder picker and Download tab endpoints."""
+class WebFolderTests(WebBase):
+    """The folder picker endpoint."""
 
     def test_dirs_lists_folders_only(self):
         for d in ("B", "a", ".hidden"):
@@ -237,7 +234,7 @@ class WebFolderAndDownloadTests(WebBase):
         self.assertEqual(status, 200, r)
         self.assertEqual(r["path"], str(self.dir.resolve()))
         self.assertEqual(r["dirs"], ["a", "B"])
-        self.assertEqual(r["archives"], 2)
+        self.assertEqual(r["files"], 2)
         self.assertEqual(r["parent"], str(self.dir.resolve().parent))
         self.assertEqual(r["shortcuts"][0]["label"], "Home")
 
@@ -249,72 +246,66 @@ class WebFolderAndDownloadTests(WebBase):
         self.assertEqual(self.request("GET", "/api/dirs?path=" + quote(str(self.dir / "nope")))[0], 400)
         self.assertEqual(self.request("GET", "/api/dirs", headers={"Host": "evil.example"})[0], 403)
 
-    def test_download_end_to_end_with_convert(self):
-        files = FileServer({"Ch 1.zip": make_zip(self.dir / "src.zip", comic_entries()).read_bytes()})
-        self.addCleanup(files.close)
-        (self.dir / "src.zip").unlink()
-        body = {
-            "urls": [files.base + "/secure/Ch%201.zip"],
-            "dest": str(self.dir),
-            "auth": {"mode": "header", "key": FileServer.KEY, "name": "X-API-Key"},
-            "convert": True,
-            "quality": 65,
-            "delete_original": True,
-        }
-        self.assertEqual(self.post("/api/download/add", body), (200, {"added": 1, "duplicates": 0}))
-        self.downloads.wait_idle()
-        self.queue.wait_idle()
-        _, st = self.request("GET", "/api/state")
-        self.assertNotIn(FileServer.KEY, json.dumps(st))
-        (dl,) = st["downloads"]
-        self.assertEqual((dl["state"], dl["auth_mode"], dl["name"]), (DONE, "header", "Ch 1.zip"))
-        (conv,) = st["jobs"]
-        self.assertEqual((conv["id"], conv["state"], conv["quality"]), (dl["convert_job_id"], DONE, 65))
-        self.assertEqual(self.files(), ["Ch 1.cbz"])
 
-    def test_download_add_validation(self):
-        good = {"urls": ["http://127.0.0.1:1/x.zip"], "dest": str(self.dir)}
-        cases = [
-            {**good, "urls": []},
-            {**good, "urls": "http://x/y"},
-            {**good, "urls": ["ftp://x/y"]},
-            {**good, "dest": ""},
-            {**good, "dest": str(self.dir / "missing")},
-            {**good, "auth": {"mode": "bearer", "key": ""}},
-            {**good, "auth": {"mode": "header", "key": "k", "name": "a:b"}},
-            {**good, "auth": {"mode": "nope", "key": "k"}},
-            {**good, "quality": 0},
-        ]
-        for body in cases:
-            with self.subTest(body=body):
-                self.assertEqual(self.post("/api/download/add", body)[0], 400)
-        self.assertEqual(self.post("/api/download/nope")[0], 404)
-        self.assertEqual(self.request("GET", "/api/state")[1]["downloads"], [])
+class ComposedServerTests(TmpDir):
+    """Other tools (harbor) mount more APIs next to the convert one; routing must keep them apart."""
 
-    def test_download_controls(self):
-        self.post("/api/download/pause", {"paused": True})
-        self.assertTrue(self.request("GET", "/api/state")[1]["downloads_paused"])
-        body = {"urls": ["http://127.0.0.1:1/a.zip", "http://127.0.0.1:1/b.zip"], "dest": str(self.dir)}
-        self.post("/api/download/add", body)
-        ids = [d["id"] for d in self.request("GET", "/api/state")[1]["downloads"]]
-        self.assertEqual(self.post("/api/download/cancel", {"id": ids[0]})[1], {"ok": True})
-        self.assertEqual(self.post("/api/download/cancel-all")[1], {"cancelled": 1})
-        self.assertEqual(self.post("/api/download/retry", {"id": ids[0]})[1], {"ok": True})
-        self.post("/api/download/pause", {"paused": False})
-        self.downloads.wait_idle()
-        states = {d["id"]: d["state"] for d in self.request("GET", "/api/state")[1]["downloads"]}
-        self.assertEqual(states, {ids[0]: FAILED, ids[1]: CANCELLED})
-        self.assertEqual(self.post("/api/download/clear")[1], {"cleared": 2})
+    class EchoAPI:
+        def __init__(self):
+            self.calls = []
 
-    def test_download_post_guards(self):
-        body = {"urls": ["http://127.0.0.1:1/a.zip"], "dest": str(self.dir)}
-        self.assertEqual(
-            self.post("/api/download/add", body, headers={"Origin": "http://evil.example"})[0], 403
+        def state(self):
+            return {"echo": len(self.calls)}
+
+        def post(self, action, body):
+            if action == "boom":
+                raise ValueError("bad input")
+            self.calls.append((action, body))
+            return 200, {"action": action}
+
+    def setUp(self):
+        super().setUp()
+        self.queue = JobQueue(workers=1, image_threads=1).start()
+        self.echo = self.EchoAPI()
+        apis = {"/api/": ConvertAPI(self.queue, {"quality": 80}), "/api/extra/": self.echo}
+        self.server = serve(0, UI_HTML, apis)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.queue.shutdown()
+        super().tearDown()
+
+    def call(self, method, path, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        headers = {"Content-Type": "application/json"} if body is not None else {}
+        conn.request(
+            method, path, body=json.dumps(body).encode() if body is not None else None, headers=headers
         )
-        status, _ = self.request(
-            "POST", "/api/download/add", b"urls=x", {"Content-Type": "application/x-www-form-urlencoded"}
-        )
-        self.assertEqual(status, 415)
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        return resp.status, data
+
+    def test_state_is_merged(self):
+        status, st = self.call("GET", "/api/state")
+        self.assertEqual(status, 200)
+        self.assertEqual(st["echo"], 0)
+        self.assertEqual(st["jobs"], [])
+
+    def test_longest_prefix_wins(self):
+        self.assertEqual(self.call("POST", "/api/extra/clear", {}), (200, {"action": "clear"}))
+        self.assertEqual(self.echo.calls, [("clear", {})])
+        self.assertEqual(self.call("POST", "/api/clear", {}), (200, {"cleared": 0}))
+        self.assertEqual(len(self.echo.calls), 1)
+
+    def test_api_errors_and_unknown_paths(self):
+        self.assertEqual(self.call("POST", "/api/extra/boom", {}), (400, {"error": "bad input"}))
+        self.assertEqual(self.call("POST", "/api/extra/a/b", {})[0], 404)
+        self.assertEqual(self.call("POST", "/nope", {})[0], 404)
+        self.assertEqual(self.call("POST", "/api/clear", [1, 2])[0], 400)
 
 
 if __name__ == "__main__":
