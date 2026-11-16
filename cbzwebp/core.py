@@ -67,7 +67,8 @@ def normalize_path(raw: str) -> Path:
     return Path(os.path.expanduser(raw)).resolve()
 
 
-def _natural_key(p: Path):
+def natural_key(p) -> list:
+    """Sort key that orders 2 before 10 (``Ch 2`` < ``Ch 10``), case-insensitive."""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", str(p))]
 
 
@@ -86,7 +87,7 @@ def scan(paths: Iterable[str | Path], recursive: bool = True) -> list[Path]:
         for f in it:
             if f.is_file() and f.suffix.lower() in ARCHIVE_EXTS:
                 found[f.resolve()] = None
-    return sorted(found, key=_natural_key)
+    return sorted(found, key=natural_key)
 
 
 # ---------------------------------------------------------------- images

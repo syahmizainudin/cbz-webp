@@ -268,12 +268,33 @@ class ComposedServerTests(TmpDir):
             self.calls.append((action, body))
             return 200, {"action": action}
 
+        def get(self, action, query):
+            if action == "img":
+                return (
+                    200,
+                    {"Content-Type": "image/webp", "Cache-Control": "private, max-age=60"},
+                    b"RIFFxxxx",
+                )
+            if action == "boom":
+                raise ValueError("no such thing")
+            return (
+                200,
+                {"Content-Type": "application/json"},
+                json.dumps({"action": action, "q": query}).encode(),
+            )
+
     def setUp(self):
         super().setUp()
         self.queue = JobQueue(workers=1, image_threads=1).start()
         self.echo = self.EchoAPI()
         apis = {"/api/": ConvertAPI(self.queue, {"quality": 80}), "/api/extra/": self.echo}
-        self.server = serve(0, UI_HTML, apis, allowed_origins={"chrome-extension://abcdefghijklmnop"})
+        self.server = serve(
+            0,
+            UI_HTML,
+            apis,
+            allowed_origins={"chrome-extension://abcdefghijklmnop"},
+            pages={"/other": b"<title>Other</title>"},
+        )
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
@@ -307,6 +328,33 @@ class ComposedServerTests(TmpDir):
         self.assertEqual(self.echo.calls, [("clear", {})])
         self.assertEqual(self.call("POST", "/api/clear", {}), (200, {"cleared": 0}))
         self.assertEqual(len(self.echo.calls), 1)
+
+    def raw_get(self, path):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        body, headers = resp.read(), dict(resp.getheaders())
+        conn.close()
+        return resp.status, headers, body
+
+    def test_get_routed_to_api(self):
+        status, headers, body = self.raw_get("/api/extra/list?page=2&page=3&q=x")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"action": "list", "q": {"page": "3", "q": "x"}})
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        status, headers, body = self.raw_get("/api/extra/img")
+        self.assertEqual((status, headers["Content-Type"], body), (200, "image/webp", b"RIFFxxxx"))
+        self.assertEqual(headers["Cache-Control"], "private, max-age=60")
+        self.assertEqual(self.raw_get("/api/extra/boom")[0], 400)
+        self.assertEqual(self.raw_get("/api/extra/a/b")[0], 404)
+        self.assertEqual(self.raw_get("/api/add")[0], 404)  # ConvertAPI has no get()
+
+    def test_extra_pages_and_framing(self):
+        status, headers, body = self.raw_get("/other")
+        self.assertEqual((status, body), (200, b"<title>Other</title>"))
+        self.assertEqual(headers["X-Frame-Options"], "SAMEORIGIN")
+        self.assertEqual(self.raw_get("/")[1]["X-Frame-Options"], "SAMEORIGIN")
+        self.assertEqual(self.raw_get("/nope")[0], 404)
 
     def test_allowed_origins(self):
         ok = self.call("POST", "/api/extra/x", {}, origin="chrome-extension://abcdefghijklmnop")
