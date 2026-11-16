@@ -25,7 +25,7 @@ Each [release](https://github.com/syahmizainudin/cbz-webp/releases) also has a w
 |---|---|
 | `cbz-webp convert <folder>... [-q 80]` | Scans the folders (subfolders included), queues every archive, converts them and exits |
 | `cbz-webp convert <folder> --dry-run` | Lists the archives it would queue and changes nothing |
-| `cbz-webp ui [-p 8765] [--open]` | Starts the web console at `http://127.0.0.1:8765/` |
+| `cbz-webp ui [-p 8765] [-d 2] [--open]` | Starts the web console at `http://127.0.0.1:8765/`, with a Convert tab and a Download tab |
 
 Options:
 
@@ -37,6 +37,7 @@ Options:
 | `--keep` | off | Keep the original `.zip` |
 | `--overwrite` | off | Replace a `Name.cbz` that already sits next to `Name.zip` |
 | `--no-recursive` | off | Scan only the given folders, not their subfolders |
+| `-d`, `--downloads` | 2 | `ui` only: downloads running at the same time |
 
 `convert` exits with status 1 if any archive failed, and 130 if you cancelled it. Ctrl+C cancels the queue and leaves every original untouched.
 
@@ -44,14 +45,33 @@ You can also type Windows paths such as `C:\Comics` in WSL. The tool reads them 
 
 ## Web console
 
-In the console you can:
+The console has two tabs. Each has its own queue, which lives in memory, so stopping the console forgets both. The console listens only on `127.0.0.1` and accepts only same-origin JSON requests, so another website cannot send it commands.
 
-- add folders or files to the queue, with their own quality and delete setting
-- watch per-archive progress, the size before and after, and the total saved
-- cancel a queued or running job, retry a failed or cancelled one
-- pause and resume the queue, and clear finished jobs
+### Convert tab
 
-The queue lives in memory, so stopping the console forgets it. Run `convert` again on the same folder to pick up where you stopped: converted `.zip` files are gone and all-WebP `.cbz` files are skipped. The console listens only on `127.0.0.1` and accepts only same-origin JSON requests, so another website cannot send it commands.
+- Add folders or files, one per line, or click **Open folder…** to browse to one. The browser shows WSL's folders, with shortcuts to your home folder and each Windows drive (`/mnt/c`, `/mnt/d`, ...).
+- Set the quality and whether the original `.zip` is deleted. These apply to the jobs you add next.
+- Watch per-archive progress, the size before and after, and the total saved.
+- Cancel a queued or running job, or retry a failed or cancelled one. Pause and resume the queue, and clear finished jobs.
+
+To pick up where you stopped after a restart, add the same folder again. Converted `.zip` files are gone, and `.cbz` files that are already all WebP are skipped.
+
+### Download tab
+
+Downloads files from direct URLs into a folder you choose.
+
+- **File URLs:** one per line, each pointing straight at a file. `http` and `https` only.
+- **Save to folder:** must already exist; **Open folder…** browses to it. An existing file is never overwritten: a second `Chapter 01.zip` is saved as `Chapter 01 (1).zip`. The file name comes from the server's `Content-Disposition` header, or else from the URL.
+- **API key sent as:** `Authorization: Bearer <key>`, a header you name (such as `X-API-Key`), a query parameter you name (such as `?api_key=`), or no key.
+- **Convert .zip / .cbz downloads:** on by default. Each downloaded archive goes into the Convert queue, using the Convert tab's quality and delete settings. Other files are only saved.
+
+About the API key:
+
+- The key stays in the console's memory for the jobs that use it. It is never shown in the queue, written to disk or printed.
+- If the server redirects a download to another address (a CDN, for example), the key is not sent there.
+- The page remembers the key in your browser only if you tick **Remember the key in this browser**.
+
+Each file downloads to `<name>.part` and is renamed when complete. A cancelled, failed or incomplete download leaves nothing behind.
 
 ## What happens to each archive
 

@@ -4,6 +4,10 @@ Each release has a `## <version>` section. The release pipeline publishes that s
 
 ## Unreleased
 
+- Web console: a **Download** tab with its own queue. It downloads direct file URLs into a chosen folder, sends an API key as a Bearer token, a named header or a query parameter, and passes downloaded `.zip`/`.cbz` files to the convert queue (optional, on by default). The key is never shown in the queue or sent on redirects, and downloads never overwrite existing files.
+- Web console: an **Open folder…** button that browses WSL folders, with shortcuts to home and each Windows drive.
+- `cbz-webp ui --downloads N` sets how many downloads run at once (default 2).
+
 ## 0.1.0
 
 First release.

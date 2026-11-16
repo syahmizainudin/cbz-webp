@@ -1,4 +1,9 @@
-"""In-memory job queue: archive-level worker threads + one shared image-encoding pool."""
+"""In-memory job queues.
+
+``BaseQueue`` holds the pending list, workers, pause, cancel, retry and clear. ``JobQueue``
+converts archives (worker threads + one shared image-encoding pool); ``download.DownloadQueue``
+fetches files.
+"""
 
 from __future__ import annotations
 
@@ -57,19 +62,24 @@ class Job:
         d["name"] = Path(self.path).name
         return d
 
+    def fresh(self) -> Job:
+        """A new queued copy of this job, for retry."""
+        return Job(self.id, self.path, self.quality, self.delete_original, self.overwrite)
 
-class JobQueue:
-    def __init__(
-        self,
-        workers: int = 1,
-        image_threads: int | None = None,
-        on_change: Callable[[Job], None] | None = None,
-    ):
+
+class BaseQueue:
+    """Shared queue machinery. Subclasses implement ``_run`` and may override ``_busy_key``.
+
+    Jobs need ``id``, ``state``, ``message``, ``started_at``, ``finished_at``, a ``cancel``
+    event, ``to_dict()`` and ``fresh()``.
+    """
+
+    thread_prefix = "worker"
+
+    def __init__(self, workers: int = 1, on_change: Callable | None = None):
         self.workers = max(1, workers)
-        self.image_threads = max(1, image_threads or os.cpu_count() or 2)
-        self.pool = ThreadPoolExecutor(self.image_threads, thread_name_prefix="webp")
         self.on_change = on_change
-        self._jobs: dict[int, Job] = {}
+        self._jobs: dict = {}
         self._pending: deque[int] = deque()
         self._ids = itertools.count(1)
         self._cond = threading.Condition()
@@ -78,9 +88,9 @@ class JobQueue:
         self._threads: list[threading.Thread] = []
 
     # ------------------------------------------------------------ lifecycle
-    def start(self) -> JobQueue:
+    def start(self):
         for n in range(self.workers):
-            t = threading.Thread(target=self._worker, name=f"archive-{n}", daemon=True)
+            t = threading.Thread(target=self._worker, name=f"{self.thread_prefix}-{n}", daemon=True)
             t.start()
             self._threads.append(t)
         return self
@@ -98,37 +108,21 @@ class JobQueue:
             self._cond.notify_all()
         for t in self._threads:
             t.join()
-        self.pool.shutdown(wait=True, cancel_futures=True)
+        self._after_shutdown()
+
+    def _after_shutdown(self) -> None:
+        pass
 
     # ------------------------------------------------------------ commands
-    def add(
-        self,
-        paths: Iterable[str | Path],
-        quality: int,
-        *,
-        delete_original: bool = True,
-        overwrite: bool = False,
-        recursive: bool = True,
-    ) -> tuple[list[Job], int]:
-        """Scan paths and enqueue each archive not already queued/running. Returns (added, dupes)."""
-        if not 1 <= int(quality) <= 100:
-            raise ValueError("quality must be 1-100")
-        archives = core.scan(paths, recursive=recursive)
-        added, dupes = [], 0
-        with self._cond:
-            active = {j.path for j in self._jobs.values() if j.state in ACTIVE}
-            for p in archives:
-                if str(p) in active:
-                    dupes += 1
-                    continue
-                job = Job(next(self._ids), str(p), int(quality), delete_original, overwrite)
-                self._jobs[job.id] = job
-                self._pending.append(job.id)
-                added.append(job)
-            self._cond.notify_all()
-        for j in added:
-            self._emit(j)
-        return added, dupes
+    def _enqueue(self, jobs: list) -> None:
+        """Register new jobs and wake the workers. Call with the lock held."""
+        for job in jobs:
+            self._jobs[job.id] = job
+            self._pending.append(job.id)
+        self._cond.notify_all()
+
+    def _new_id(self) -> int:
+        return next(self._ids)
 
     def cancel(self, job_id: int) -> bool:
         with self._cond:
@@ -154,12 +148,11 @@ class JobQueue:
             job = self._jobs.get(job_id)
             if not job or job.state not in (FAILED, CANCELLED):
                 return False
-            if any(j.path == job.path and j.state in ACTIVE for j in self._jobs.values()):
+            key = self._dedup_key(job)
+            if any(self._dedup_key(j) == key and j.state in ACTIVE for j in self._jobs.values()):
                 return False
-            fresh = Job(job.id, job.path, job.quality, job.delete_original, job.overwrite)
-            self._jobs[job.id] = fresh
-            self._pending.append(job.id)
-            self._cond.notify_all()
+            fresh = job.fresh()
+            self._enqueue([fresh])
         self._emit(fresh)
         return True
 
@@ -204,15 +197,19 @@ class JobQueue:
     def _finish(self, job: Job, state: str, message: str) -> None:
         job.state, job.message, job.finished_at = state, message, time.time()
 
-    def _next_runnable(self) -> Job | None:
-        """First pending job whose output file no running job is writing.
+    def _dedup_key(self, job):
+        """Jobs with equal keys are never queued or running twice."""
+        return job.id
 
-        ``Name.zip`` and ``Name.cbz`` both write ``Name.cbz(.part)``; running them at once
-        would corrupt the output. Call with the lock held.
-        """
-        busy = {_dest(j.path) for j in self._jobs.values() if j.state == RUNNING}
+    def _busy_key(self, job):
+        """Jobs with equal non-None keys never run at the same time."""
+        return None
+
+    def _next_runnable(self):
+        """First pending job whose busy key no running job holds. Call with the lock held."""
+        busy = {self._busy_key(j) for j in self._jobs.values() if j.state == RUNNING} - {None}
         for jid in self._pending:
-            if _dest(self._jobs[jid].path) not in busy:
+            if self._busy_key(self._jobs[jid]) not in busy:
                 self._pending.remove(jid)
                 return self._jobs[jid]
         return None
@@ -233,6 +230,62 @@ class JobQueue:
             with self._cond:
                 self._cond.notify_all()
             self._emit(job)
+
+    def _run(self, job) -> None:
+        raise NotImplementedError
+
+
+class JobQueue(BaseQueue):
+    """Converts archives. Image encoding for all jobs shares one thread pool."""
+
+    thread_prefix = "archive"
+
+    def __init__(
+        self,
+        workers: int = 1,
+        image_threads: int | None = None,
+        on_change: Callable[[Job], None] | None = None,
+    ):
+        super().__init__(workers, on_change)
+        self.image_threads = max(1, image_threads or os.cpu_count() or 2)
+        self.pool = ThreadPoolExecutor(self.image_threads, thread_name_prefix="webp")
+
+    def _after_shutdown(self) -> None:
+        self.pool.shutdown(wait=True, cancel_futures=True)
+
+    def add(
+        self,
+        paths: Iterable[str | Path],
+        quality: int,
+        *,
+        delete_original: bool = True,
+        overwrite: bool = False,
+        recursive: bool = True,
+    ) -> tuple[list[Job], int]:
+        """Scan paths and enqueue each archive not already queued/running. Returns (added, dupes)."""
+        if not 1 <= int(quality) <= 100:
+            raise ValueError("quality must be 1-100")
+        archives = core.scan(paths, recursive=recursive)
+        added, dupes = [], 0
+        with self._cond:
+            active = {j.path for j in self._jobs.values() if j.state in ACTIVE}
+            for p in archives:
+                if str(p) in active:
+                    dupes += 1
+                    continue
+                added.append(Job(self._new_id(), str(p), int(quality), delete_original, overwrite))
+                active.add(str(p))
+            self._enqueue(added)
+        for j in added:
+            self._emit(j)
+        return added, dupes
+
+    def _dedup_key(self, job: Job):
+        return job.path
+
+    def _busy_key(self, job: Job):
+        # Name.zip and Name.cbz both write Name.cbz(.part): never run them at once.
+        return _dest(job.path)
 
     def _run(self, job: Job) -> None:
         def progress(done: int, total: int) -> None:
