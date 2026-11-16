@@ -178,5 +178,32 @@ class QueueTests(Base):
         self.assertLessEqual(jobs[0].finished_at, jobs[1].started_at)
 
 
+class MethodTests(Base):
+    def test_method_reaches_encoder_and_changes_output(self):
+        sizes = {}
+        for m in (0, 6):
+            src = make_zip(self.dir / f"m{m}.zip", {"1.png": img_bytes("PNG", size=(600, 800))})
+            q = JobQueue(workers=1, image_threads=1).start()
+            (job,), _ = q.add([src], 80, delete_original=False, method=m)
+            q.wait_idle()
+            q.shutdown()
+            self.assertEqual((job.state, job.method), (DONE, m))
+            sizes[m] = job.bytes_out
+        self.assertNotEqual(sizes[0], sizes[6])
+
+    def test_method_validated_and_kept_on_retry(self):
+        q = JobQueue(workers=1, image_threads=1)
+        with self.assertRaisesRegex(ValueError, "method must be 0-6"):
+            q.add([self.dir], 80, method=7)
+        self.comic("A.zip")
+        q.set_paused(True)
+        q.start()
+        (job,), _ = q.add([self.dir], 80, method=2)
+        q.cancel(job.id)
+        q.retry(job.id)
+        self.assertEqual(q.jobs()[0].method, 2)
+        q.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -108,6 +108,13 @@
           <input type="range" id="qr" min="1" max="100">
           <input type="number" id="qn" min="1" max="100"><span class="note">%</span>
         </div>
+        <label class="check" for="method">Encoder effort
+          <select id="method" title="Lower is faster; higher gives smaller files">
+            <option value="0">0 · fastest</option><option value="1">1</option><option value="2">2</option>
+            <option value="3">3</option><option value="4">4 · default</option><option value="5">5</option>
+            <option value="6">6 · smallest</option>
+          </select>
+        </label>
         <label class="check"><input type="checkbox" id="del" checked> Delete original .zip after the .cbz is verified</label>
         <label class="check"><input type="checkbox" id="ovw"> Overwrite an existing .cbz</label>
         <button class="primary" id="add">Add to queue</button>
@@ -235,7 +242,7 @@ $("add").onclick = async () => {
   if (!paths.length) return say($("msg"), "Enter at least one folder.", true);
   if (!(quality >= 1 && quality <= 100)) return say($("msg"), "Quality must be 1–100.", true);
   try {
-    const r = await api("/api/add", { paths, quality, delete_original: $("del").checked, overwrite: $("ovw").checked });
+    const r = await api("/api/add", { paths, quality, delete_original: $("del").checked, overwrite: $("ovw").checked, method: +$("method").value });
     say($("msg"), `Queued ${r.added} archive(s)` + (r.duplicates ? `, ${r.duplicates} already in queue` : "") + ".");
     refresh();
   } catch (e) { say($("msg"), e.message, true); }
@@ -281,13 +288,13 @@ function renderConvert(st) {
     if (j.kept && j.kept.length) det += `<div class="note" title="${esc(j.kept.join("\n"))}">kept as-is: ${esc(j.kept.slice(0,3).join(", "))}${j.kept.length > 3 ? "…" : ""}</div>`;
     return `<tr><td class="name">${esc(j.name)}<div class="dir">${esc(dir)}</div></td>
       <td><span class="state s-${j.state}">${j.state}</span>${prog}</td>
-      <td>${j.quality}%${j.delete_original ? "" : ' <span class="note">keep</span>'}</td>
+      <td>${j.quality}%<span class="note" title="encoder effort"> · e${j.method ?? 4}</span>${j.delete_original ? "" : ' <span class="note">keep</span>'}</td>
       <td class="size">${size}</td><td>${det}</td><td>${actionBtn(j)}</td></tr>`;
   }).join("");
 }
 
 function render(st) {
-  if (!defaultsSet) { $("qr").value = $("qn").value = st.defaults.quality; defaultsSet = true; }
+  if (!defaultsSet) { $("qr").value = $("qn").value = st.defaults.quality; $("method").value = st.defaults.method ?? 4; defaultsSet = true; }
   renderConvert(st);
 }
 

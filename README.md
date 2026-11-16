@@ -32,6 +32,7 @@ Options:
 | Option | Default | Meaning |
 |---|---|---|
 | `-q`, `--quality` | 80 | WebP quality, 1 to 100 |
+| `-m`, `--method` | 4 | Encoder effort, 0 to 6. Lower is faster; higher gives smaller files at the same quality. 2 or 3 is noticeably faster on large libraries |
 | `-j`, `--jobs` | 1 | Archives converted at the same time |
 | `-t`, `--threads` | CPU count | Image-encoding threads, shared by all jobs |
 | `--keep` | off | Keep the original `.zip` |
@@ -47,7 +48,7 @@ You can also type Windows paths such as `C:\Comics` in WSL. The tool reads them 
 In the console you can:
 
 - Add folders or files, one per line, or click **Open folder…** to browse to one. The browser shows WSL's folders, with shortcuts to your home folder and each Windows drive (`/mnt/c`, `/mnt/d`, ...).
-- Set the quality and whether the original `.zip` is deleted. These apply to the jobs you add next.
+- Set the quality, the encoder effort and whether the original `.zip` is deleted. These apply to the jobs you add next.
 - Watch per-archive progress, the size before and after, and the total saved.
 - Cancel a queued or running job, or retry a failed or cancelled one. Pause and resume the queue, and clear finished jobs.
 
@@ -57,7 +58,7 @@ To download files from URLs, use [dl-queue](https://github.com/syahmizainudin/dl
 
 ### Using the console in another tool
 
-`cbzwebp.web.serve(port, page, apis)` serves any page with any set of APIs, each mounted at a URL prefix. `ConvertAPI` is this tool's convert queue as one of those APIs. Each API has `state() -> dict`, which is merged into `GET /api/state`, and `post(action, body) -> (status, dict)`, which answers `POST <prefix><action>`. The server adds the request checks and the folder picker's `GET /api/dirs`.
+`cbzwebp.web.serve(port, page, apis)` serves any page with any set of APIs, each mounted at a URL prefix. `ConvertAPI` is this tool's convert queue as one of those APIs. Each API has `state() -> dict`, which is merged into `GET /api/state`, and `post(action, body) -> (status, dict)`, which answers `POST <prefix><action>`. The server adds the request checks and the folder picker's `GET /api/dirs`. `allowed_origins` lists exact extra origins whose requests are accepted, such as a browser extension's `chrome-extension://<id>`.
 
 ## What happens to each archive
 
@@ -85,6 +86,10 @@ Inside each archive:
 3. Only then is it renamed to `Name.cbz`, and only after that is `Name.zip` deleted.
 
 If any step fails, or you cancel, the tool removes the `.part` and does not touch the original.
+
+## CPU or GPU?
+
+Encoding runs on the CPU, through Pillow's libwebp, on all cores by default. libwebp has no GPU encoder, and GPU video encoders don't produce WebP images. To go faster, lower `--method`, and if many archives are small, raise `--jobs`.
 
 ## Development
 

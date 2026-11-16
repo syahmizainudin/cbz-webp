@@ -43,6 +43,7 @@ class Job:
     quality: int
     delete_original: bool
     overwrite: bool
+    method: int = core.DEFAULT_METHOD
     state: str = QUEUED
     done: int = 0
     total: int = 0
@@ -64,7 +65,7 @@ class Job:
 
     def fresh(self) -> Job:
         """A new queued copy of this job, for retry."""
-        return Job(self.id, self.path, self.quality, self.delete_original, self.overwrite)
+        return Job(self.id, self.path, self.quality, self.delete_original, self.overwrite, self.method)
 
 
 class BaseQueue:
@@ -261,10 +262,16 @@ class JobQueue(BaseQueue):
         delete_original: bool = True,
         overwrite: bool = False,
         recursive: bool = True,
+        method: int = core.DEFAULT_METHOD,
     ) -> tuple[list[Job], int]:
-        """Scan paths and enqueue each archive not already queued/running. Returns (added, dupes)."""
+        """Scan paths and enqueue each archive not already queued/running. Returns (added, dupes).
+
+        ``method`` is libwebp's effort, 0 (fastest) to 6 (smallest files).
+        """
         if not 1 <= int(quality) <= 100:
             raise ValueError("quality must be 1-100")
+        if not 0 <= int(method) <= 6:
+            raise ValueError("method must be 0-6")
         archives = core.scan(paths, recursive=recursive)
         added, dupes = [], 0
         with self._cond:
@@ -273,7 +280,9 @@ class JobQueue(BaseQueue):
                 if str(p) in active:
                     dupes += 1
                     continue
-                added.append(Job(self._new_id(), str(p), int(quality), delete_original, overwrite))
+                added.append(
+                    Job(self._new_id(), str(p), int(quality), delete_original, overwrite, int(method))
+                )
                 active.add(str(p))
             self._enqueue(added)
         for j in added:
@@ -300,6 +309,7 @@ class JobQueue(BaseQueue):
                 overwrite=job.overwrite,
                 progress=progress,
                 cancel=job.cancel,
+                method=job.method,
             )
         except core.Cancelled:
             self._finish(job, CANCELLED, "cancelled; original untouched")

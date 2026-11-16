@@ -28,6 +28,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 CONVERT_EXTS = IMAGE_EXTS - {".webp"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini"}
 WEBP_MAX_SIDE = 16383
+DEFAULT_METHOD = 4  # libwebp effort: 0 = fastest, 6 = smallest files
 PART_SUFFIX = ".part"
 
 ProgressFn = Callable[[int, int], None]

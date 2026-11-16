@@ -96,6 +96,11 @@ class CliTests(TmpDir):
             self.assertIsNone(z.testzip())
             self.assertIn("001.webp", z.namelist())
 
+    def test_method_flag(self):
+        make_zip(self.dir / "A.zip", comic_entries())
+        self.assertEqual(run_cli("convert", str(self.dir), "-m", "1")[0], 0)
+        self.assertEqual(run_cli("convert", str(self.dir), "-m", "7")[0], 2)
+
     def test_bad_arguments(self):
         self.assertEqual(run_cli("convert", str(self.dir / "missing"))[0], 2)
         self.assertEqual(run_cli("convert", str(self.dir), "-q", "0")[0], 2)
@@ -156,13 +161,13 @@ class WebTests(WebBase):
     def test_add_runs_job_and_dedups(self):
         make_zip(self.dir / "A.zip", comic_entries())
         self.post("/api/pause", {"paused": True})
-        status, r = self.post("/api/add", {"paths": [str(self.dir)], "quality": 60})
+        status, r = self.post("/api/add", {"paths": [str(self.dir)], "quality": 60, "method": 2})
         self.assertEqual((status, r), (200, {"added": 1, "duplicates": 0}))
         self.assertEqual(self.post("/api/add", {"paths": [str(self.dir)]})[1], {"added": 0, "duplicates": 1})
         self.post("/api/pause", {"paused": False})
         self.queue.wait_idle()
         job = self.request("GET", "/api/state")[1]["jobs"][0]
-        self.assertEqual((job["state"], job["quality"], job["name"]), (DONE, 60, "A.zip"))
+        self.assertEqual((job["state"], job["quality"], job["method"], job["name"]), (DONE, 60, 2, "A.zip"))
         self.assertGreater(job["bytes_out"], 0)
         self.assertEqual(self.files(), ["A.cbz"])
 
@@ -268,7 +273,7 @@ class ComposedServerTests(TmpDir):
         self.queue = JobQueue(workers=1, image_threads=1).start()
         self.echo = self.EchoAPI()
         apis = {"/api/": ConvertAPI(self.queue, {"quality": 80}), "/api/extra/": self.echo}
-        self.server = serve(0, UI_HTML, apis)
+        self.server = serve(0, UI_HTML, apis, allowed_origins={"chrome-extension://abcdefghijklmnop"})
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
@@ -278,9 +283,11 @@ class ComposedServerTests(TmpDir):
         self.queue.shutdown()
         super().tearDown()
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, origin=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         headers = {"Content-Type": "application/json"} if body is not None else {}
+        if origin:
+            headers["Origin"] = origin
         conn.request(
             method, path, body=json.dumps(body).encode() if body is not None else None, headers=headers
         )
@@ -300,6 +307,21 @@ class ComposedServerTests(TmpDir):
         self.assertEqual(self.echo.calls, [("clear", {})])
         self.assertEqual(self.call("POST", "/api/clear", {}), (200, {"cleared": 0}))
         self.assertEqual(len(self.echo.calls), 1)
+
+    def test_allowed_origins(self):
+        ok = self.call("POST", "/api/extra/x", {}, origin="chrome-extension://abcdefghijklmnop")
+        self.assertEqual(ok[0], 200)
+        own = self.call("POST", "/api/extra/x", {}, origin=f"http://127.0.0.1:{self.port}")
+        self.assertEqual(own[0], 200)
+        for bad in (
+            "chrome-extension://ponmlkjihgfedcba",  # another extension
+            "https://evil.example",
+            f"https://127.0.0.1:{self.port}",  # right host, wrong scheme
+            "null",
+        ):
+            with self.subTest(origin=bad):
+                self.assertEqual(self.call("POST", "/api/extra/x", {}, origin=bad)[0], 403)
+        self.assertEqual(len(self.echo.calls), 2)
 
     def test_api_errors_and_unknown_paths(self):
         self.assertEqual(self.call("POST", "/api/extra/boom", {}), (400, {"error": "bad input"}))

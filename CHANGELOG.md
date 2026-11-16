@@ -4,6 +4,11 @@ Each release has a `## <version>` section. The release pipeline publishes that s
 
 ## Unreleased
 
+## 0.2.0
+
+- Encoder effort setting: `-m`/`--method` 0–6 on `convert` and `ui`, a dropdown on the page, and `method` in `JobQueue.add` and the `add` endpoint. Default 4, as before.
+- `serve(..., allowed_origins=...)` accepts requests from exact extra origins, such as a browser extension. The page's own origin must now be plain `http`.
+
 ## 0.1.0
 
 First release.

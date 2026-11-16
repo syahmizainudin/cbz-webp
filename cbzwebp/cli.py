@@ -28,8 +28,22 @@ def _quality(v: str) -> int:
     return q
 
 
+def _method(v: str) -> int:
+    m = int(v)
+    if not 0 <= m <= 6:
+        raise argparse.ArgumentTypeError("method must be 0-6")
+    return m
+
+
 def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("-q", "--quality", type=_quality, default=80, help="WebP quality 1-100 (default 80)")
+    p.add_argument(
+        "-m",
+        "--method",
+        type=_method,
+        default=4,
+        help="encoder effort 0-6: lower is faster, higher gives smaller files (default 4)",
+    )
     p.add_argument(
         "-j", "--jobs", type=int, default=1, help="archives converted at the same time (default 1)"
     )
@@ -109,7 +123,14 @@ def cmd_convert(args) -> int:
                     print(f"        deleted {job.deleted}", flush=True)
 
     q = JobQueue(workers=args.jobs, image_threads=args.threads, on_change=on_change).start()
-    q.add(archives, args.quality, delete_original=not args.keep, overwrite=args.overwrite, recursive=False)
+    q.add(
+        archives,
+        args.quality,
+        delete_original=not args.keep,
+        overwrite=args.overwrite,
+        recursive=False,
+        method=args.method,
+    )
 
     def interrupt(*_):
         print("\nCancelling… (originals are left untouched)", flush=True)
@@ -139,10 +160,10 @@ def cmd_ui(args) -> int:
 
     q = JobQueue(workers=args.jobs, image_threads=args.threads).start()
     if args.paths:
-        added, _ = q.add(args.paths, args.quality, delete_original=not args.keep)
+        added, _ = q.add(args.paths, args.quality, delete_original=not args.keep, method=args.method)
         print(f"Queued {len(added)} archive(s).")
     try:
-        server = serve_convert(args.port, q, {"quality": args.quality})
+        server = serve_convert(args.port, q, {"quality": args.quality, "method": args.method})
     except OSError as e:
         print(f"cbz-webp: cannot listen on 127.0.0.1:{args.port}: {e}", file=sys.stderr)
         q.shutdown()
