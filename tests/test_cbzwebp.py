@@ -1,12 +1,14 @@
 """Run: python3 -m unittest discover -s tests  (from the cbz-webp folder)."""
 
 import io
+import struct
 import tempfile
 import threading
 import unittest
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest import mock
 
 from helpers import comic_entries, img_bytes, make_zip
 from PIL import Image
@@ -116,6 +118,68 @@ class ConvertTests(Base):
         self.assertTrue(src.exists())
         self.assertFalse(src.with_suffix(".cbz").exists())
         self.assertFalse(list(self.dir.glob("*.part")))
+
+    def _corrupt_part_then_verify(self, how):
+        """Patch ``core._verify`` to damage the .part on disk before the real check runs."""
+        real = core._verify
+
+        def wrapper(part, expected, webp_names, **kw):
+            with zipfile.ZipFile(part) as z:
+                info = z.getinfo(sorted(webp_names)[0])
+            with open(part, "r+b") as f:
+                f.seek(info.header_offset)
+                head = f.read(30)
+                fn_len, extra_len = struct.unpack("<HH", head[26:30])
+                start = info.header_offset + 30 + fn_len + extra_len
+                how(f, start, info)
+            return real(part, expected, webp_names, **kw)
+
+        return mock.patch.object(core, "_verify", wrapper)
+
+    def _run_failing_job(self, src, how):
+        with self._corrupt_part_then_verify(how):
+            q = JobQueue(workers=1, image_threads=2).start()
+            (job,), _ = q.add([src], 75)
+            q.wait_idle()
+            q.shutdown()
+        self.assertEqual(job.state, FAILED, job.message)
+        self.assertIn("verify:", job.message)
+        self.assertTrue(src.exists(), "source must survive a failed verify")
+        self.assertFalse(src.with_suffix(".cbz").exists())
+        self.assertFalse(list(self.dir.glob("*.part")), ".part must be removed")
+        return job
+
+    def test_verify_reads_part_from_disk_crc_error_fails(self):
+        src = self.comic()
+
+        def flip(f, start, info):  # damaged bytes: the stored CRC no longer matches
+            f.seek(start + info.compress_size // 2)
+            f.write(b"\xff" * 16)
+
+        job = self._run_failing_job(src, flip)
+        self.assertIn("Bad CRC", job.message)
+
+    def test_verify_undecodable_webp_fails(self):
+        src = self.comic()
+
+        def garbage(f, start, info):  # valid CRC, but the bytes are not a WebP
+            junk = b"\x00" * info.compress_size
+            f.seek(start)
+            f.write(junk)
+            # patch the CRC in the local header and the central directory to match
+            crc = struct.pack("<I", zipfile.crc32(junk) & 0xFFFFFFFF)
+            f.seek(info.header_offset + 14)
+            f.write(crc)
+            f.seek(0)
+            data = f.read()
+            name = info.filename.encode()
+            pos = data.find(name, data.find(b"PK\x01\x02"))
+            cd = data.rfind(b"PK\x01\x02", 0, pos)
+            f.seek(cd + 16)
+            f.write(crc)
+
+        job = self._run_failing_job(src, garbage)
+        self.assertIn("does not decode", job.message)
 
     def test_scan_recursive_and_windows_path(self):
         self.comic(sub="a/b")

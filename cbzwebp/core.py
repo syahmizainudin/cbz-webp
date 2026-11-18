@@ -155,20 +155,45 @@ def _plan(infos: list[zipfile.ZipInfo]) -> list[_Entry]:
     return plan
 
 
-def _verify(part: Path, expected: list[str], webp_names: set[str]) -> None:
-    with zipfile.ZipFile(part) as z:
-        bad = z.testzip()
-        if bad:
-            raise ConvertError(f"verify: CRC error in {bad}")
-        names = z.namelist()
-        if names != expected:
-            raise ConvertError(f"verify: wrote {len(names)} entries, expected {len(expected)}")
-        for n in webp_names:
-            try:
-                with Image.open(io.BytesIO(z.read(n))) as im:
-                    im.load()
-            except Exception as e:
-                raise ConvertError(f"verify: {n} does not decode ({e})") from e
+def _decode(data: bytes) -> None:
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+
+
+def _verify(part: Path, expected: list[str], webp_names: set[str], *, pool: Executor, window: int) -> None:
+    """Reopen the .part on disk and check it in one pass over its entries.
+
+    ``z.read`` checks every entry's CRC, and each WebP is decoded on ``pool``, at most
+    ``window`` at a time. Any problem raises ``ConvertError``. Cancel is not checked here.
+    """
+    decoding: deque[tuple[str, Future]] = deque()
+
+    def check_one() -> None:
+        n, fut = decoding.popleft()
+        try:
+            fut.result()
+        except Exception as e:
+            raise ConvertError(f"verify: {n} does not decode ({e})") from e
+
+    try:
+        with zipfile.ZipFile(part) as z:
+            names = z.namelist()
+            if names != expected:
+                raise ConvertError(f"verify: wrote {len(names)} entries, expected {len(expected)}")
+            for n in names:
+                try:
+                    data = z.read(n)
+                except Exception as e:
+                    raise ConvertError(f"verify: cannot read {n} ({e})") from e
+                if n in webp_names:
+                    decoding.append((n, pool.submit(_decode, data)))
+                    while len(decoding) > window:
+                        check_one()
+        while decoding:
+            check_one()
+    finally:
+        for _, fut in decoding:
+            fut.cancel()
 
 
 def convert_archive(
@@ -257,7 +282,7 @@ def convert_archive(
                         raise Cancelled()
                     flush_one(zout)
 
-        _verify(part, written, webp_names)
+        _verify(part, written, webp_names, pool=pool, window=window)
         os.replace(part, dest)
     except BaseException:
         for _, _, fut in pending:

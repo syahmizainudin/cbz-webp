@@ -31,7 +31,7 @@ It is one of three related repos:
 By default `convert` deletes each original `.zip`, so the conversion must never lose data. These rules hold today, and the tests cover rules 3 to 7 directly. Keep them all:
 
 1. Output goes to `<Name>.cbz.part` in the **same folder** as the source, so the final `os.replace` stays on one file system.
-2. The `.part` is reopened and checked before it is renamed: `testzip()`, the entry list equals what was written, every WebP decodes (`_verify`).
+2. The `.part` is reopened from disk and checked before it is renamed: the entry list equals what was written, every entry reads back with a good CRC, every WebP decodes (`_verify`).
 3. The source `.zip` is deleted only after the rename succeeded. Never on skip, failure or cancel. A failed delete is reported, not raised.
 4. Any exception or cancel removes the `.part` and leaves the source as it was.
 5. Archives with no images, `.cbz` files that are already all WebP, and a `.zip` whose `.cbz` already exists (without `overwrite`) are skipped without being rewritten.
