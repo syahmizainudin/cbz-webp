@@ -4,6 +4,7 @@ import io
 import struct
 import tempfile
 import threading
+import time
 import unittest
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -270,9 +271,12 @@ class QueueTests(Base):
         self.assertLessEqual(jobs[0].finished_at, jobs[1].started_at)
 
     def test_cancel_all_one_pass_emits_once_per_job(self):
+        release = threading.Event()  # holds the worker so the emits below can't interleave
+
         class Blocking(BaseQueue):
             def _run(self, job):
                 job.cancel.wait(10)
+                release.wait(10)
                 self._finish(job, CANCELLED if job.cancel.is_set() else DONE, "")
 
         seen = []
@@ -281,8 +285,11 @@ class QueueTests(Base):
         with q._cond:
             q._enqueue(jobs)
         q.start()
+        deadline = time.monotonic() + 10
         while jobs[0].state != RUNNING:
-            threading.Event().wait(0.01)
+            if time.monotonic() > deadline:
+                self.fail("first job never started")
+            time.sleep(0.01)
         seen.clear()
         self.assertEqual(q.cancel_all(), 3)
         self.assertEqual(
@@ -294,6 +301,7 @@ class QueueTests(Base):
             ],
         )
         self.assertEqual(list(q._pending), [])
+        release.set()
         q.wait_idle()
         self.assertEqual(q.cancel_all(), 0)
         q.shutdown()
