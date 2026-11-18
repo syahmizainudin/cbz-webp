@@ -85,8 +85,9 @@ def scan(paths: Iterable[str | Path], recursive: bool = True) -> list[Path]:
             raise FileNotFoundError(f"not found: {p}")
         it = p.rglob("*") if recursive else p.iterdir()
         for f in it:
-            if f.is_file() and f.suffix.lower() in ARCHIVE_EXTS:
-                found[f.resolve()] = None
+            # Extension first: it needs no system call, so only archives get stat'ed.
+            if f.suffix.lower() in ARCHIVE_EXTS and f.is_file():
+                found[f.resolve()] = None  # resolve: a symlink and its target count once
     return sorted(found, key=natural_key)
 
 

@@ -190,6 +190,13 @@ class ConvertTests(Base):
         self.assertEqual(len(core.scan([self.dir], recursive=False)), 1)
         self.assertEqual(str(core.normalize_path(r"C:\Comics\A")), "/mnt/c/Comics/A")
 
+    def test_scan_dedupes_symlinks_and_skips_folders_named_like_archives(self):
+        real = self.comic("A.zip")
+        (self.dir / "link.zip").symlink_to(real)
+        (self.dir / "folder.cbz").mkdir()
+        (self.dir / "dangling.zip").symlink_to(self.dir / "missing.zip")
+        self.assertEqual(core.scan([self.dir]), [real.resolve()])
+
 
 class QueueTests(Base):
     def test_queue_runs_all_and_dedups(self):
