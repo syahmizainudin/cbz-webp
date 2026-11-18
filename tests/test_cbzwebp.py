@@ -14,7 +14,7 @@ from helpers import comic_entries, img_bytes, make_zip
 from PIL import Image
 
 from cbzwebp import core
-from cbzwebp.jobqueue import CANCELLED, DONE, FAILED, SKIPPED, JobQueue
+from cbzwebp.jobqueue import CANCELLED, DONE, FAILED, RUNNING, SKIPPED, BaseQueue, Job, JobQueue
 
 
 class Base(unittest.TestCase):
@@ -262,6 +262,37 @@ class QueueTests(Base):
         jobs = sorted(q.jobs(), key=lambda j: j.started_at)
         self.assertEqual([j.state for j in jobs], [DONE, DONE])
         self.assertLessEqual(jobs[0].finished_at, jobs[1].started_at)
+
+    def test_cancel_all_one_pass_emits_once_per_job(self):
+        class Blocking(BaseQueue):
+            def _run(self, job):
+                job.cancel.wait(10)
+                self._finish(job, CANCELLED if job.cancel.is_set() else DONE, "")
+
+        seen = []
+        q = Blocking(workers=1, on_change=lambda j: seen.append((j.id, j.state, j.message)))
+        jobs = [Job(q._new_id(), f"/x/{i}.zip", 80, False, False) for i in range(3)]
+        with q._cond:
+            q._enqueue(jobs)
+        q.start()
+        while jobs[0].state != RUNNING:
+            threading.Event().wait(0.01)
+        seen.clear()
+        self.assertEqual(q.cancel_all(), 3)
+        self.assertEqual(
+            seen[:3],
+            [
+                (1, RUNNING, "cancelling…"),
+                (2, CANCELLED, "cancelled before start"),
+                (3, CANCELLED, "cancelled before start"),
+            ],
+        )
+        self.assertEqual(list(q._pending), [])
+        q.wait_idle()
+        self.assertEqual(q.cancel_all(), 0)
+        q.shutdown()
+        self.assertEqual([j.state for j in q.jobs()], [CANCELLED] * 3)
+        self.assertEqual([i for i, st, _ in seen if st == CANCELLED], [2, 3, 1])
 
 
 class MethodTests(Base):
