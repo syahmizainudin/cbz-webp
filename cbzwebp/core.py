@@ -135,6 +135,12 @@ def encode_webp(data: bytes, quality: int, method: int = 4) -> tuple[bytes | Non
 # ---------------------------------------------------------------- archives
 
 
+def output_path(src: Path) -> Path:
+    """Where ``src`` is written: a .cbz is rewritten in place, ``Name.zip`` becomes ``Name.cbz``."""
+    src = Path(src)
+    return src if src.suffix.lower() == ".cbz" else src.with_suffix(".cbz")
+
+
 @dataclass
 class _Entry:
     info: zipfile.ZipInfo
@@ -218,7 +224,7 @@ def convert_archive(
     """
     src = Path(src)
     is_cbz = src.suffix.lower() == ".cbz"
-    dest = src if is_cbz else src.with_suffix(".cbz")
+    dest = output_path(src)
     bytes_in = src.stat().st_size
 
     if not is_cbz and dest.exists() and not overwrite:

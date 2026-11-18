@@ -33,7 +33,7 @@ FINISHED = {DONE, SKIPPED, FAILED, CANCELLED}
 
 
 def _dest(path: str) -> str:
-    return str(Path(path).with_suffix(".cbz")).lower()
+    return str(core.output_path(Path(path))).lower()
 
 
 @dataclass

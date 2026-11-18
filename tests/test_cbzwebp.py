@@ -190,6 +190,12 @@ class ConvertTests(Base):
         self.assertEqual(len(core.scan([self.dir], recursive=False)), 1)
         self.assertEqual(str(core.normalize_path(r"C:\Comics\A")), "/mnt/c/Comics/A")
 
+    def test_output_path(self):
+        self.assertEqual(core.output_path(Path("/a/Vol 1.zip")), Path("/a/Vol 1.cbz"))
+        self.assertEqual(core.output_path(Path("/a/Vol 1.ZIP")), Path("/a/Vol 1.cbz"))
+        self.assertEqual(core.output_path(Path("/a/Vol 1.CBZ")), Path("/a/Vol 1.CBZ"))
+        self.assertEqual(core.output_path(Path("/a/v1.0.cbz")), Path("/a/v1.0.cbz"))
+
     def test_scan_dedupes_symlinks_and_skips_folders_named_like_archives(self):
         real = self.comic("A.zip")
         (self.dir / "link.zip").symlink_to(real)
