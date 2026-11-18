@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import parse_qs, urlsplit
 
-from .core import ARCHIVE_EXTS, normalize_path
+from .core import ARCHIVE_EXTS, DEFAULT_METHOD, normalize_path
 from .jobqueue import JobQueue
 
 UI_HTML = (Path(__file__).parent / "ui.html").read_bytes()
@@ -321,7 +321,7 @@ class ConvertAPI:
                 delete_original=bool(body.get("delete_original", True)),
                 overwrite=bool(body.get("overwrite", False)),
                 recursive=bool(body.get("recursive", True)),
-                method=int(body.get("method", self.defaults.get("method", 4))),
+                method=int(body.get("method", self.defaults.get("method", DEFAULT_METHOD))),
             )
             return 200, {"added": len(added), "duplicates": dupes}
         if action == "cancel":

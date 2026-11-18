@@ -106,7 +106,7 @@ def is_junk(name: str) -> bool:
     return base.lower() in JUNK_NAMES or base.startswith("._")
 
 
-def encode_webp(data: bytes, quality: int, method: int = 4) -> tuple[bytes | None, str]:
+def encode_webp(data: bytes, quality: int, method: int = DEFAULT_METHOD) -> tuple[bytes | None, str]:
     """Encode one image to WebP.
 
     Returns ``(webp_bytes, "")`` or ``(None, reason)`` when the image should be copied
@@ -214,7 +214,7 @@ def convert_archive(
     overwrite: bool = False,
     progress: ProgressFn | None = None,
     cancel: threading.Event | None = None,
-    method: int = 4,
+    method: int = DEFAULT_METHOD,
     window: int = 8,
 ) -> Result:
     """Convert one .zip/.cbz to a WebP .cbz next to it. See module docstring for safety rules.

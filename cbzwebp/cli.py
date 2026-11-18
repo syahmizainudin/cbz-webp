@@ -10,7 +10,7 @@ import threading
 import webbrowser
 
 from . import __version__, core
-from .jobqueue import DONE, FAILED, RUNNING, SKIPPED, Job, JobQueue
+from .jobqueue import CANCELLED, DONE, FAILED, RUNNING, SKIPPED, Job, JobQueue
 
 
 def _fmt(n: int) -> str:
@@ -112,7 +112,7 @@ def cmd_convert(args) -> int:
                     return
                 print(f"[start] {job.path}", flush=True)
                 return
-            if job.state in (DONE, SKIPPED, FAILED, "cancelled"):
+            if job.state in (DONE, SKIPPED, FAILED, CANCELLED):
                 finished[0] += 1
                 tag = {DONE: "done", SKIPPED: "skip", FAILED: "FAIL"}.get(job.state, "cancel")
                 size = f" {_fmt(job.bytes_in)} -> {_fmt(job.bytes_out)} |" if job.state == DONE else ""
@@ -146,13 +146,13 @@ def cmd_convert(args) -> int:
     bin_, bout = sum(j.bytes_in for j in done), sum(j.bytes_out for j in done)
     print(
         f"\n{len(done)} converted, {sum(j.state == SKIPPED for j in jobs)} skipped, "
-        f"{len(failed)} failed, {sum(j.state == 'cancelled' for j in jobs)} cancelled."
+        f"{len(failed)} failed, {sum(j.state == CANCELLED for j in jobs)} cancelled."
     )
     if bin_:
         print(f"Size {_fmt(bin_)} -> {_fmt(bout)} ({100 * (1 - bout / bin_):.0f}% smaller).")
     if failed:
         return 1
-    return 130 if any(j.state == "cancelled" for j in jobs) else 0
+    return 130 if any(j.state == CANCELLED for j in jobs) else 0
 
 
 def cmd_ui(args) -> int:
