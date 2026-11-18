@@ -116,7 +116,7 @@ def encode_webp(data: bytes, quality: int, method: int = 4) -> tuple[bytes | Non
         if getattr(im, "n_frames", 1) > 1:
             return None, "animated"
         im.load()
-        im = ImageOps.exif_transpose(im)
+        ImageOps.exif_transpose(im, in_place=True)  # returns None; no copy when upright
         if max(im.size) > WEBP_MAX_SIDE:
             return None, f"{im.size[0]}x{im.size[1]} exceeds WebP limit"
         if im.mode in ("I", "I;16", "I;16B", "I;16L", "I;16N"):
@@ -124,7 +124,9 @@ def encode_webp(data: bytes, quality: int, method: int = 4) -> tuple[bytes | Non
         has_alpha = im.mode in ("RGBA", "LA", "PA", "RGBa", "La") or (
             im.mode == "P" and "transparency" in im.info
         )
-        im = im.convert("RGBA" if has_alpha else "RGB")
+        target = "RGBA" if has_alpha else "RGB"
+        if im.mode != target:  # LA, PA, P, L, CMYK, ... are converted; RGB/RGBA as they are
+            im = im.convert(target)
         out = io.BytesIO()
         im.save(out, "WEBP", quality=quality, method=method)
         return out.getvalue(), ""

@@ -197,6 +197,21 @@ class ConvertTests(Base):
         (self.dir / "dangling.zip").symlink_to(self.dir / "missing.zip")
         self.assertEqual(core.scan([self.dir]), [real.resolve()])
 
+    def test_exif_orientation_applied(self):
+        im = Image.new("RGB", (300, 200), "white")
+        im.paste((255, 0, 0), (0, 0, 30, 30))  # red mark top-left of the stored pixels
+        exif = Image.Exif()
+        exif[0x0112] = 6  # Orientation: rotate 90 degrees clockwise to display
+        b = io.BytesIO()
+        im.save(b, "JPEG", quality=95, exif=exif)
+        webp, reason = core.encode_webp(b.getvalue(), 90)
+        self.assertEqual(reason, "")
+        with Image.open(io.BytesIO(webp)) as out:
+            self.assertEqual(out.size, (200, 300))
+            r, g, _ = out.convert("RGB").getpixel((185, 15))  # the mark is now top-right
+            self.assertGreater(r, 200)
+            self.assertLess(g, 80)
+
 
 class QueueTests(Base):
     def test_queue_runs_all_and_dedups(self):
