@@ -283,10 +283,10 @@ function renderConvert(st) {
   const chips = chipsFor(c);
   if (bin) chips.push(`<span class="chip">saved <b>${fmt(bin - bout)}</b> (${Math.round(100 * (1 - bout / bin))}%)</span>`);
   chips.push(`<span class="chip">${st.workers} archive worker(s) · ${st.image_threads} image threads${paused ? " · <b>paused</b>" : ""}</span>`);
-  $("stats").innerHTML = chips.join("");
+  setHTML($("stats"), chips.join(""));
 
-  if (!st.jobs.length) { $("rows").innerHTML = `<tr><td colspan="6" class="empty">Queue is empty.</td></tr>`; return; }
-  $("rows").innerHTML = st.jobs.map(j => {
+  if (!st.jobs.length) { setHTML($("rows"), `<tr><td colspan="6" class="empty">Queue is empty.</td></tr>`); return; }
+  setHTML($("rows"), st.jobs.map(j => {
     const dir = j.path.slice(0, j.path.length - j.name.length);
     const pct = j.total ? Math.round(100 * j.done / j.total) : 0;
     const prog = j.state === "running" ? `<div class="prog"><i style="width:${pct}%"></i></div><span class="note">${j.done}/${j.total}</span>` : "";
@@ -298,7 +298,7 @@ function renderConvert(st) {
       <td><span class="state s-${j.state}">${j.state}</span>${prog}</td>
       <td>${j.quality}%<span class="note" title="encoder effort"> · e${j.method ?? 4}</span>${j.delete_original ? "" : ' <span class="note">keep</span>'}</td>
       <td class="size">${size}</td><td>${det}</td><td>${actionBtn(j)}</td></tr>`;
-  }).join("");
+  }).join(""));
 }
 
 function render(st) {
@@ -306,11 +306,40 @@ function render(st) {
   renderConvert(st);
 }
 
+/* ===== BEGIN polling + render cache (same block in dl-queue's and harbor's pages) ===== */
+// One timer chain: each refresh() schedules the next one when it finishes, every 1 s while the
+// page is visible and every 5 s while it is hidden. Only one request is in flight at a time; a
+// refresh() asked for meanwhile (an action handler) runs as soon as the current one ends.
+let pollTimer = null, polling = false, pollAgain = false;
+function schedulePoll(ms) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(refresh, ms);
+}
 async function refresh() {
+  if (polling) { pollAgain = true; return; }
+  clearTimeout(pollTimer);
+  polling = true;
   try { render(await api("/api/state")); }
   catch (e) { say($("msg"), "Lost connection to the server: " + e.message, true); }
+  finally {
+    polling = false;
+    if (pollAgain) { pollAgain = false; schedulePoll(0); }
+    else schedulePoll(document.hidden ? 5000 : 1000);
+  }
 }
-refresh(); setInterval(refresh, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+
+// render() still builds every string each time (so anything time-based keeps updating), but an
+// element's innerHTML is assigned only when its string changed since the last assignment.
+const htmlCache = new Map();
+function setHTML(el, html) {
+  if (htmlCache.get(el) === html) return;
+  htmlCache.set(el, html);
+  el.innerHTML = html;
+}
+/* ===== END polling + render cache ===== */
+
+refresh();
 </script>
 </body>
 </html>
