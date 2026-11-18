@@ -4,6 +4,13 @@ Each release has a `## <version>` section. The release pipeline publishes that s
 
 ## Unreleased
 
+- Faster checks before an archive is replaced: the written `.cbz.part` is read back in one pass (every entry's CRC) and its WebP pages are decoded on the image threads instead of one at a time. It is still read from disk, and a failure still leaves the original untouched.
+- Folder scans stat only `.zip`/`.cbz` files.
+- Pages are rotated by their EXIF orientation without an extra copy, and RGB/RGBA pages skip a needless mode conversion.
+- Cancel all cancels every job in one step under the queue lock.
+- The console polls with one timer and never overlaps requests; it slows to every 5 s in a background tab and updates the stats and job table only when they change.
+- `convert_archive` takes `window=` (images in flight on the pool) instead of reading the pool's private worker count; `core.output_path(src)` names the `.cbz` an archive is written to.
+
 ## 0.4.1
 
 - Sign-in: the `auth` object may also define `allows(user, method, path)`. When it returns False, a signed-in request gets 403. Hosts use it for permissions on what the server serves itself, such as the folder browser (`/api/dirs`).
