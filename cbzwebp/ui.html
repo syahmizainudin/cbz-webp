@@ -306,7 +306,7 @@ function render(st) {
   renderConvert(st);
 }
 
-/* ===== BEGIN polling + render cache (same block in dl-queue's and harbor's pages) ===== */
+/* ===== BEGIN polling + render cache (dl-queue's and harbor's pages use the same pattern) ===== */
 // One timer chain: each refresh() schedules the next one when it finishes, every 1 s while the
 // page is visible and every 5 s while it is hidden. Only one request is in flight at a time; a
 // refresh() asked for meanwhile (an action handler) runs as soon as the current one ends.
