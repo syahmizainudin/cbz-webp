@@ -209,8 +209,13 @@ def convert_archive(
     progress: ProgressFn | None = None,
     cancel: threading.Event | None = None,
     method: int = 4,
+    window: int = 8,
 ) -> Result:
-    """Convert one .zip/.cbz to a WebP .cbz next to it. See module docstring for safety rules."""
+    """Convert one .zip/.cbz to a WebP .cbz next to it. See module docstring for safety rules.
+
+    ``window`` is how many images may be in flight on ``pool`` at once (encoding, then
+    verifying); about twice the pool's threads keeps it busy without holding many pages.
+    """
     src = Path(src)
     is_cbz = src.suffix.lower() == ".cbz"
     dest = src if is_cbz else src.with_suffix(".cbz")
@@ -225,7 +230,7 @@ def convert_archive(
         raise ConvertError(f"not a valid zip: {e}") from e
 
     part = dest.with_name(dest.name + PART_SUFFIX)
-    window = max(2, getattr(pool, "_max_workers", 4) * 2)
+    window = max(2, window)
     res = Result("done", "", bytes_in=bytes_in)
     pending: deque[tuple[_Entry, bytes, Future | None]] = deque()
     written: list[str] = []

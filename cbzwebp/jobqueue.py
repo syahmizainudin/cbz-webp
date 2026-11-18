@@ -323,6 +323,7 @@ class JobQueue(BaseQueue):
                 progress=progress,
                 cancel=job.cancel,
                 method=job.method,
+                window=2 * self.image_threads,
             )
         except core.Cancelled:
             self._finish(job, CANCELLED, "cancelled; original untouched")
