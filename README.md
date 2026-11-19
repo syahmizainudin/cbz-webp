@@ -60,6 +60,8 @@ To download files from URLs, use [dl-queue](https://github.com/syahmizainudin/dl
 
 `cbzwebp.web.serve(port, page, apis)` serves any page with any set of APIs, each mounted at a URL prefix. `ConvertAPI` is this tool's convert queue as one of those APIs. Each API has `state() -> dict`, which is merged into `GET /api/state`, and `post(action, body) -> (status, dict)`, which answers `POST <prefix><action>`. The server adds the request checks and the folder picker's `GET /api/dirs`. `allowed_origins` lists exact extra origins whose requests are accepted, such as a browser extension's `chrome-extension://<id>`.
 
+By default the console listens on 127.0.0.1 only. A tool that puts it on a network passes `serve(..., host=, allowed_hosts=, ssl_context=, trust_proxy=)` and is responsible for doing that safely; harbor does, with accounts and HTTPS required.
+
 ## What happens to each archive
 
 | Input | Result |
