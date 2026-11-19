@@ -4,6 +4,8 @@ Each release has a `## <version>` section. The release pipeline publishes that s
 
 ## Unreleased
 
+- **Watch folders:** `cbz-webp ui --watch FOLDER` (and `cbzwebp.watch.Watcher` for hosts) queues every archive that appears in the folder once it has stopped changing, converts each version of a file once, and never queues its own output. Watched originals are kept unless `--watch-delete` is given.
+
 ## 0.5.0
 
 - **For hosts (harbor): reaching the console from other devices.** `serve()` takes `host` (bind address), `allowed_hosts` (host names accepted besides 127.0.0.1 and localhost), `ssl_context` (HTTPS; the TLS handshake runs in the request's thread) and `trust_proxy` (a reverse proxy on this machine may pass `X-Forwarded-Proto`, `-Host` and `-For`). The Origin check follows the scheme and host actually used. Without them nothing changes: the console stays on 127.0.0.1.

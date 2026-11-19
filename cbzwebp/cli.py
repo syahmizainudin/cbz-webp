@@ -80,6 +80,18 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--open", action="store_true", help="open the console in a browser")
     u.add_argument("paths", nargs="*", help="optional folders to queue at start-up")
     u.add_argument("--keep", action="store_true", help="for start-up paths: keep the original .zip")
+    u.add_argument(
+        "--watch",
+        action="append",
+        default=[],
+        metavar="FOLDER",
+        help="convert archives that appear in this folder on their own (may be given more than once)",
+    )
+    u.add_argument(
+        "--watch-delete",
+        action="store_true",
+        help="delete watched originals after converting (default: keep)",
+    )
     return ap
 
 
@@ -159,6 +171,19 @@ def cmd_ui(args) -> int:
     from .web import serve_convert
 
     q = JobQueue(workers=args.jobs, image_threads=args.threads).start()
+    watcher = None
+    if args.watch:
+        from .watch import Watcher
+
+        try:
+            watcher = Watcher(
+                q, args.watch, args.quality, method=args.method, delete_original=args.watch_delete
+            ).start()
+        except ValueError as e:
+            print(f"cbz-webp: {e}", file=sys.stderr)
+            q.shutdown()
+            return 2
+        print(f"Watching {', '.join(map(str, watcher.folders))}", flush=True)
     if args.paths:
         added, _ = q.add(args.paths, args.quality, delete_original=not args.keep, method=args.method)
         print(f"Queued {len(added)} archive(s).")
@@ -186,6 +211,8 @@ def cmd_ui(args) -> int:
         print("\nStopping…", flush=True)
     finally:
         server.server_close()
+        if watcher:
+            watcher.stop()  # before the queue, so nothing is added to a stopping queue
         q.shutdown()
     return 0
 

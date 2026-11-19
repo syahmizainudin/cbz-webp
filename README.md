@@ -56,6 +56,10 @@ The queue lives in memory, so stopping the console forgets it. To pick up where 
 
 To download files from URLs, use [dl-queue](https://github.com/syahmizainudin/dl-queue).
 
+### Watch folders
+
+`cbz-webp ui --watch /mnt/d/Inbox` converts every `.zip` or `.cbz` that appears in that folder (or its subfolders) without you clicking anything. Give `--watch` more than once for several folders. Every 30 seconds the folders are checked, and a file is queued once it has stopped changing, so a file still being copied waits. Each file is converted once; one that fails is tried again only after it changes. Originals are **kept** unless you add `--watch-delete`. After a restart, files still in the folders are checked once more.
+
 ### Using the console in another tool
 
 `cbzwebp.web.serve(port, page, apis)` serves any page with any set of APIs, each mounted at a URL prefix. `ConvertAPI` is this tool's convert queue as one of those APIs. Each API has `state() -> dict`, which is merged into `GET /api/state`, and `post(action, body) -> (status, dict)`, which answers `POST <prefix><action>`. The server adds the request checks and the folder picker's `GET /api/dirs`. `allowed_origins` lists exact extra origins whose requests are accepted, such as a browser extension's `chrome-extension://<id>`.

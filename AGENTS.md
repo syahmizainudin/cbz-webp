@@ -18,6 +18,7 @@ It is one of three related repos:
 |---|---|
 | `cbzwebp/core.py` | Scanning folders and converting one archive. All file writes, renames and deletes happen here |
 | `cbzwebp/jobqueue.py` | `BaseQueue` (pending list, workers, pause, cancel, retry, clear) and `JobQueue` (archive workers plus one shared image-encoding pool) |
+| `cbzwebp/watch.py` | `Watcher`: polls watch folders and queues archives that have stopped changing |
 | `cbzwebp/web.py` | The generic console server (`serve`, `list_dirs`, request guards), `ConvertAPI`, and `serve_convert` for this tool's page |
 | `cbzwebp/ui.html` | The console page: one file, CSS and JS inline, no external requests |
 | `cbzwebp/cli.py` | `convert` and `ui` subcommands |
@@ -72,6 +73,13 @@ Both must pass before you hand work back. CI pins ruff (`RUFF_VERSION` in `ci.ym
   | the generic server part of `cbzwebp/web.py` (between the `generic server part` markers) | the same part of `dlqueue/web.py` |
   | `normalize_path` in `cbzwebp/core.py` | `normalize_path` in `dlqueue/paths.py` |
   | the folder-picker markup, CSS and JS in `ui.html` | the same in `dlqueue/ui.html` and harbor's `harbor/ui.html` |
+
+## Watch folders
+
+- `Watcher` only ever calls `JobQueue.add`; all file changes still go through `core.convert_archive`.
+- `delete_original` defaults to False and must stay so: nobody reviews a watched file before it's converted.
+- A file version (path, size, mtime) is queued once, and a finished job's output is marked handled before the next scan, so a conversion never feeds itself. Tests: `tests/test_watch.py`.
+- Stop the watcher before the queue.
 
 ## Releasing
 
