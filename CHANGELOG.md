@@ -4,6 +4,8 @@ Each release has a `## <version>` section. The release pipeline publishes that s
 
 ## Unreleased
 
+## 0.5.1
+
 - **Watch folders:** `cbz-webp ui --watch FOLDER` (and `cbzwebp.watch.Watcher` for hosts) queues every archive that appears in the folder once it has stopped changing, converts each version of a file once, and never queues its own output. Watched originals are kept unless `--watch-delete` is given.
 
 ## 0.5.0
